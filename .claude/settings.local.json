@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run dev)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(ffmpeg -i ref/login.mp4 -vf \"select=''''not(mod(n\\,30))''''\" -vsync vfr -frames:v 5 /tmp/login_frame_%d.png)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
