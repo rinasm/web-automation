@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { X, Copy, CheckCircle } from 'lucide-react'
 import { Step } from '../store/stepStore'
 import { generatePlaywrightCode } from '../utils/codeGenerator'
+import { useMobileDeviceStore } from '../store/mobileDeviceStore'
 
 interface CodeModalProps {
   step: Step & { url: string }
@@ -11,11 +12,18 @@ interface CodeModalProps {
 function CodeModal({ step, onClose }: CodeModalProps) {
   const [code, setCode] = useState('')
   const [copied, setCopied] = useState(false)
+  const { currentMode, getCurrentDevice } = useMobileDeviceStore()
+
+  const currentDevice = getCurrentDevice()
+  const isMobile = currentMode === 'mobile'
 
   useEffect(() => {
-    const generatedCode = generatePlaywrightCode(step)
+    const generatedCode = generatePlaywrightCode(step, {
+      isMobile,
+      device: currentDevice || undefined
+    })
     setCode(generatedCode)
-  }, [step])
+  }, [step, isMobile, currentDevice])
 
   const handleCopy = () => {
     navigator.clipboard.writeText(code)

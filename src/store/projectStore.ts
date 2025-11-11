@@ -1,13 +1,18 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { MobileAppsConfig, PlatformType } from '../types/feature'
 
 export interface Project {
   id: string
   title: string
-  url: string
+  webUrl?: string
+  mobileApps?: MobileAppsConfig
+  currentPlatform: PlatformType
   description: string
   createdAt: number
   lastEdited: number
+  // Legacy field for backward compatibility - will be migrated to webUrl
+  url?: string
 }
 
 interface ProjectState {
@@ -22,12 +27,21 @@ interface ProjectState {
   login: (username: string) => void
   logout: () => void
   navigateTo: (page: 'login' | 'dashboard' | 'project') => void
-  createProject: (title: string, url: string, description: string) => string
+  createProject: (
+    title: string,
+    description: string,
+    webUrl?: string,
+    mobileApps?: MobileAppsConfig,
+    initialPlatform?: PlatformType
+  ) => string
   deleteProject: (projectId: string) => void
   openProject: (projectId: string) => void
   closeProjectTab: (projectId: string) => void
   setCurrentProject: (projectId: string) => void
   updateProjectLastEdited: (projectId: string) => void
+  updateProject: (projectId: string, updates: Partial<Project>) => void
+  setPlatform: (projectId: string, platform: PlatformType) => void
+  getProjectById: (projectId: string) => Project | undefined
 }
 
 export const useProjectStore = create<ProjectState>()(
@@ -62,11 +76,19 @@ export const useProjectStore = create<ProjectState>()(
     set({ currentPage: page })
   },
 
-  createProject: (title: string, url: string, description: string) => {
+  createProject: (
+    title: string,
+    description: string,
+    webUrl?: string,
+    mobileApps?: MobileAppsConfig,
+    initialPlatform: PlatformType = 'web'
+  ) => {
     const newProject: Project = {
       id: crypto.randomUUID(),
       title,
-      url,
+      webUrl,
+      mobileApps,
+      currentPlatform: initialPlatform,
       description,
       createdAt: Date.now(),
       lastEdited: Date.now(),
@@ -144,6 +166,31 @@ export const useProjectStore = create<ProjectState>()(
           : project
       ),
     }))
+  },
+
+  updateProject: (projectId: string, updates: Partial<Project>) => {
+    set((state) => ({
+      projects: state.projects.map((project) =>
+        project.id === projectId
+          ? { ...project, ...updates, lastEdited: Date.now() }
+          : project
+      ),
+    }))
+  },
+
+  setPlatform: (projectId: string, platform: PlatformType) => {
+    set((state) => ({
+      projects: state.projects.map((project) =>
+        project.id === projectId
+          ? { ...project, currentPlatform: platform, lastEdited: Date.now() }
+          : project
+      ),
+    }))
+  },
+
+  getProjectById: (projectId: string): Project | undefined => {
+    const state = useProjectStore.getState()
+    return state.projects.find((p: Project) => p.id === projectId)
   },
 }),
     {

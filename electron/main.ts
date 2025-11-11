@@ -1,5 +1,8 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, session } from 'electron';
 import * as path from 'path';
+import { setupMobileDeviceIPC } from './mobileDeviceIPC';
+import { setupSpeechRecognitionIPC } from './speechRecognition';
+import { getWebSocketServer, stopWebSocketServer } from './websocketServer';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -14,6 +17,8 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       webviewTag: true,
+      // Disable sandbox to allow media access
+      sandbox: false,
     },
   });
 
@@ -30,7 +35,44 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Setup mobile device IPC handlers
+  setupMobileDeviceIPC(ipcMain);
+
+  // Setup speech recognition IPC handlers
+  setupSpeechRecognitionIPC();
+
+  // Handle microphone permission requests for speech recognition
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    console.log('🎤 Permission requested:', permission);
+
+    // Automatically grant media permissions
+    if (permission === 'media') {
+      console.log('🎤 Granting media permission');
+      callback(true);
+    } else {
+      callback(false);
+    }
+  });
+
+  // Handle permission check for media devices
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission, _requestingOrigin) => {
+    console.log('🎤 Permission check:', permission);
+
+    if (permission === 'media') {
+      console.log('🎤 Allowing media permission check');
+      return true;
+    }
+    return false;
+  });
+
   createWindow();
+
+  // Start WebSocket server for SDK connections
+  if (mainWindow) {
+    console.log('🟢 [Main] Starting WebSocket server for SnapTest SDK...');
+    const wsServer = getWebSocketServer();
+    wsServer.start(mainWindow);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -43,6 +85,12 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+app.on('will-quit', () => {
+  // Clean up WebSocket server
+  console.log('🔴 [Main] Stopping WebSocket server...');
+  stopWebSocketServer();
 });
 
 // IPC handlers for communication with renderer
@@ -60,6 +108,38 @@ ipcMain.handle('execute-flow', async (_event, steps) => {
 ipcMain.handle('generate-code', async (_event, flow) => {
   // Generate Playwright code from flow
   return generatePlaywrightCode(flow);
+});
+
+// SDK WebSocket - Send command to connected SDK
+ipcMain.handle('sdk:send-command', async (_event, deviceId: string, commandType: 'startRecording' | 'stopRecording') => {
+  console.log(`📤 [IPC] Sending SDK command: ${commandType} to device ${deviceId}`);
+
+  const wsServer = getWebSocketServer();
+  const success = wsServer.sendCommand(deviceId, commandType);
+
+  if (success) {
+    console.log(`✅ [IPC] Command sent successfully`);
+    return { success: true };
+  } else {
+    console.warn(`⚠️ [IPC] Failed to send command - device not found`);
+    return { success: false, error: 'Device not connected' };
+  }
+});
+
+// SDK WebSocket - Send any message to connected SDK device
+ipcMain.handle('sdk:send-message', async (_event, deviceId: string, message: any) => {
+  console.log(`📤 [IPC] Sending message to SDK device ${deviceId}:`, message.type);
+
+  const wsServer = getWebSocketServer();
+  const success = wsServer.sendToDevice(deviceId, message);
+
+  if (success) {
+    console.log(`✅ [IPC] Message sent successfully`);
+    return { success: true };
+  } else {
+    console.warn(`⚠️ [IPC] Failed to send message - device not found`);
+    return { success: false, error: 'Device not connected' };
+  }
 });
 
 function generatePlaywrightCode(flow: any): string {

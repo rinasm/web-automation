@@ -108,7 +108,7 @@ function ActionList({ stepId, actions }: ActionListProps) {
                     onChange={(e) =>
                       updateAction(stepId, action.id, { selector: e.target.value })
                     }
-                    placeholder="XPath selector..."
+                    placeholder="Click target icon to capture selector..."
                     className="flex-1 px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
                   <button
@@ -117,7 +117,7 @@ function ActionList({ stepId, actions }: ActionListProps) {
                     onMouseLeave={() => handleTargetButtonHover(action.id, false, Boolean(action.selector))}
                     disabled={isCapturingSelector && capturingActionId !== action.id}
                     className={`p-1.5 rounded transition-colors ${getTargetButtonClass(action)} disabled:opacity-50 disabled:cursor-not-allowed`}
-                    title={action.selector ? 'Selector captured (click to recapture)' : 'Capture selector'}
+                    title={action.selector ? 'Selector captured (click to recapture)' : 'Click to capture selector from page'}
                   >
                     <Target size={16} />
                   </button>
@@ -127,19 +127,42 @@ function ActionList({ stepId, actions }: ActionListProps) {
 
             {/* Value input (for type and wait) */}
             {(action.type === 'type' || action.type === 'wait') && (
-              <input
-                type={action.type === 'wait' ? 'number' : 'text'}
-                value={action.value || ''}
-                onChange={(e) =>
-                  updateAction(stepId, action.id, { value: e.target.value })
-                }
-                placeholder={
-                  action.type === 'type'
-                    ? 'Text to type...'
-                    : 'Wait time (ms)...'
-                }
-                className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
+              <div className="space-y-1">
+                {/* Debug: Show if password detection is working */}
+                {action.type === 'type' && action.selector && (
+                  <div className="text-xs text-gray-500 mb-1">
+                    {action.selector.includes('password') ? '🔒 Password field detected' : ''}
+                  </div>
+                )}
+                <input
+                  type={action.type === 'wait' ? 'number' : action.isPassword ? 'password' : 'text'}
+                  value={action.value || ''}
+                  onChange={(e) =>
+                    updateAction(stepId, action.id, { value: e.target.value })
+                  }
+                  placeholder={
+                    action.type === 'type'
+                      ? action.isPassword ? 'Password...' : 'Text to type...'
+                      : 'Wait time (ms)...'
+                  }
+                  className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                {action.isPassword && (
+                  <div className="text-xs text-amber-600 flex items-center gap-1">
+                    <span>🔒</span>
+                    <span>Password field - click to edit password</span>
+                  </div>
+                )}
+                {/* Manual password toggle for existing actions */}
+                {action.type === 'type' && !action.isPassword && action.selector?.toLowerCase().includes('password') && (
+                  <button
+                    onClick={() => updateAction(stepId, action.id, { isPassword: true })}
+                    className="text-xs text-blue-600 hover:underline"
+                  >
+                    Mark as password field
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>

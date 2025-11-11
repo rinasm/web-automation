@@ -1,26 +1,17 @@
 import { useState } from 'react'
-import { Plus, X } from 'lucide-react'
+import { Plus, X, Settings } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
+import { ProjectCreationDialog } from '../components/ProjectCreationDialog'
+import { SettingsDialog } from '../components/SettingsDialog'
 
 function Dashboard() {
   const { projects, openProject, username, logout, openProjectTabs, setCurrentProject } = useProjectStore()
   const [showCreateModal, setShowCreateModal] = useState(false)
-  const [projectTitle, setProjectTitle] = useState('')
-  const [websiteUrl, setWebsiteUrl] = useState('')
-  const [projectDescription, setProjectDescription] = useState('')
+  const [showSettingsModal, setShowSettingsModal] = useState(false)
 
-  const { createProject } = useProjectStore()
-
-  const handleCreateProject = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (projectTitle.trim() && websiteUrl.trim()) {
-      createProject(projectTitle, websiteUrl, projectDescription)
-      // Reset form
-      setProjectTitle('')
-      setWebsiteUrl('')
-      setProjectDescription('')
-      setShowCreateModal(false)
-    }
+  const handleProjectCreated = (projectId: string) => {
+    setShowCreateModal(false)
+    openProject(projectId)
   }
 
   const formatDate = (timestamp: number) => {
@@ -79,6 +70,13 @@ function Dashboard() {
 
         {/* User Info */}
         <div className="flex items-center gap-4">
+          <button
+            onClick={() => setShowSettingsModal(true)}
+            className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-all"
+            title="Settings"
+          >
+            <Settings size={20} />
+          </button>
           <span className="text-sm font-medium text-gray-700">{username}</span>
           <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-md">
             <span className="text-white text-sm font-semibold">
@@ -155,105 +153,18 @@ function Dashboard() {
         }
       `}</style>
 
-      {/* Create Project Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn">
-          <div className="bg-white rounded-2xl p-8 w-full max-w-lg shadow-2xl transform animate-scaleIn">
-            <h2 className="text-3xl font-bold text-gray-900 mb-2">New Project</h2>
-            <p className="text-gray-500 mb-8">Create a new automation testing project</p>
+      {/* Create Project Dialog */}
+      <ProjectCreationDialog
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onSuccess={handleProjectCreated}
+      />
 
-            <form onSubmit={handleCreateProject} className="space-y-5">
-              {/* Project Title */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Project title
-                </label>
-                <input
-                  type="text"
-                  value={projectTitle}
-                  onChange={(e) => setProjectTitle(e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                  placeholder="My Awesome Project"
-                  autoFocus
-                  required
-                />
-              </div>
-
-              {/* Website URL */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Website URL
-                </label>
-                <input
-                  type="url"
-                  value={websiteUrl}
-                  onChange={(e) => setWebsiteUrl(e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                  placeholder="https://example.com"
-                  required
-                />
-              </div>
-
-              {/* About this project */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  About this project
-                </label>
-                <textarea
-                  value={projectDescription}
-                  onChange={(e) => setProjectDescription(e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none transition-all"
-                  rows={3}
-                  placeholder="Brief description of your test automation project..."
-                />
-              </div>
-
-              {/* Buttons */}
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="submit"
-                  className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg font-medium hover:from-indigo-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-all transform hover:scale-[1.02] active:scale-[0.98]"
-                >
-                  Create Project
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-all transform hover:scale-[1.02] active:scale-[0.98]"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      <style>{`
-        @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-
-        .animate-fadeIn {
-          animation: fadeIn 0.2s ease-out;
-        }
-
-        @keyframes scaleIn {
-          from {
-            opacity: 0;
-            transform: scale(0.95);
-          }
-          to {
-            opacity: 1;
-            transform: scale(1);
-          }
-        }
-
-        .animate-scaleIn {
-          animation: scaleIn 0.3s ease-out;
-        }
-      `}</style>
+      {/* Settings Dialog */}
+      <SettingsDialog
+        isOpen={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+      />
     </div>
   )
 }

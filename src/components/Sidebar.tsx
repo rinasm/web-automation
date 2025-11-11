@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, Play, FileText, Settings, ClipboardList, Zap, TrendingUp } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Play, FileText, Settings, ClipboardList, Zap, TrendingUp, Sparkles } from 'lucide-react'
 import { useStepStore } from '../store/stepStore'
+import { useSettingsStore } from '../store/settingsStore'
 
 interface SidebarProps {
   activeTab: string
@@ -10,6 +11,7 @@ interface SidebarProps {
 function Sidebar({ activeTab, onTabChange }: SidebarProps) {
   const [isExpanded, setIsExpanded] = useState(true)
   const { steps } = useStepStore()
+  const { advancedMode } = useSettingsStore()
   const [stats, setStats] = useState({ totalSteps: 0, totalActions: 0 })
 
   useEffect(() => {
@@ -18,38 +20,54 @@ function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     setStats({ totalSteps, totalActions })
   }, [steps])
 
-  const menuItems = [
+  const allMenuItems = [
     {
       id: 'flow',
-      label: 'Flow',
+      label: 'Features',
       icon: Play,
-      description: 'Create and manage test flows'
+      description: 'Create and manage test features',
+      isAdvanced: false
     },
     {
       id: 'autoflow',
       label: 'Auto Flow',
       icon: Zap,
-      description: 'Automatically extract flows'
+      description: 'Automatically extract flows',
+      isAdvanced: true
+    },
+    {
+      id: 'aiexplore',
+      label: 'AI Explore',
+      icon: Sparkles,
+      description: 'Intelligent journey discovery',
+      isNew: true,
+      isAdvanced: true
     },
     {
       id: 'results',
       label: 'Results',
       icon: ClipboardList,
-      description: 'View test execution results'
+      description: 'View test execution results',
+      isAdvanced: false
     },
     {
       id: 'reports',
       label: 'Reports',
       icon: FileText,
-      description: 'Generate test reports'
+      description: 'Generate test reports',
+      isAdvanced: false
     },
     {
       id: 'settings',
       label: 'Settings',
       icon: Settings,
-      description: 'Configure test settings'
+      description: 'Configure test settings',
+      isAdvanced: false
     }
   ]
+
+  // Filter menu items based on advanced mode
+  const menuItems = allMenuItems.filter(item => !item.isAdvanced || advancedMode)
 
   return (
     <div
@@ -139,9 +157,16 @@ function Sidebar({ activeTab, onTabChange }: SidebarProps) {
                   <Icon size={20} className={isActive ? 'text-indigo-600' : 'text-gray-600'} />
                 </div>
                 {isExpanded && (
-                  <span className={`text-sm font-medium flex-1 text-left ${isActive ? 'text-indigo-600' : 'text-gray-700'}`}>
-                    {item.label}
-                  </span>
+                  <div className="flex items-center gap-2 flex-1">
+                    <span className={`text-sm font-medium text-left ${isActive ? 'text-indigo-600' : 'text-gray-700'}`}>
+                      {item.label}
+                    </span>
+                    {item.isNew && (
+                      <span className="text-[10px] px-1.5 py-0.5 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-full font-bold">
+                        NEW
+                      </span>
+                    )}
+                  </div>
                 )}
                 {isActive && isExpanded && (
                   <div className="w-1 h-6 bg-indigo-600 rounded-full animate-pulse" />

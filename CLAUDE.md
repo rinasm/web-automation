@@ -4,7 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an Electron desktop application that enables users to visually generate Playwright test code by interacting with websites loaded in the app. Users can point-and-click on elements, define test steps, and export ready-to-use Playwright scripts.
+This is an Electron desktop application that enables users to visually generate Playwright test code by interacting with websites loaded in the app. It offers three powerful modes:
+
+1. **Manual Flow**: Point-and-click interface to manually define test steps
+2. **Auto Flow**: Automatic detection of common user journeys (login, forms, search)
+3. **AI Explore** (NEW): Intelligent journey discovery powered by Claude AI that autonomously explores your application and discovers meaningful user flows
+
+Users can create flows, record interactions, and export ready-to-use Playwright scripts.
 
 ## Development Commands
 
@@ -153,6 +159,129 @@ The `electron-builder` configuration in `package.json` defines:
 - Platform-specific targets (macOS app, Windows NSIS, Linux AppImage)
 
 When packaging, ensure both React and Electron builds are up-to-date.
+
+## AI-Powered Journey Exploration
+
+### Overview
+The **AI Explore** feature uses Anthropic's Claude AI to intelligently discover meaningful user journeys by autonomously exploring your web application.
+
+### Architecture
+Key components:
+
+1. **Claude Service** (`src/services/claudeService.ts`):
+   - Handles API communication with Anthropic
+   - Manages API key storage (localStorage)
+   - Supports message history and system prompts
+
+2. **AI Decision Service** (`src/services/aiDecisionService.ts`):
+   - Analyzes page context (title, content, elements)
+   - Decides next actions (which element to click)
+   - Detects journey completion
+   - Generates journey names
+   - Filters noise elements (logout, help, etc.)
+
+3. **Exploration Controller** (`src/services/explorationController.ts`):
+   - Orchestrates exploration loop
+   - Manages journey tree building
+   - Handles backtracking and path tracking
+   - Emits events for UI updates
+   - Converts journeys to test steps
+
+4. **UI Components**:
+   - `AIExplorationPanel.tsx`: Main exploration interface
+   - `JourneyCompletionDialog.tsx`: Journey confirmation UI
+   - `ApiKeyDialog.tsx`: API key configuration
+
+### How It Works
+
+1. **Page Analysis**: Extract URL, title, heading, visible text, and interactable elements
+2. **AI Decision**: Claude analyzes context and decides to click an element or complete
+3. **Action Execution**: Click element, wait for page load, capture new state
+4. **Tree Building**: Create child node, check for loops, recurse
+5. **Completion**: When AI detects goal achieved, pause for user confirmation
+6. **Conversion**: Convert approved journeys to manual flow format
+
+### AI Prompts
+The system uses two main prompts:
+
+**System Prompt**: Establishes AI as QA automation expert with goals:
+- Discover business-critical flows
+- Prioritize common user tasks
+- Avoid utility and destructive actions
+
+**Decision Prompt**: Provides per-page context:
+- Current journey path
+- Page information (URL, title, content)
+- Available elements with descriptions
+- Request JSON response with next action
+
+### Configuration
+Located in `ExplorationController`:
+```typescript
+{
+  maxDepth: 10,              // Maximum clicks deep
+  waitTimeBetweenActions: 2000, // Wait time in ms
+  ignoreElements: [],        // Patterns to ignore
+  autoSaveJourneys: false,   // Auto-save without confirmation
+  explorationStrategy: 'ai-guided' // Strategy type
+}
+```
+
+### API Key Management
+- Stored in localStorage (`anthropic_api_key`)
+- Can also use environment variable (`VITE_ANTHROPIC_API_KEY`)
+- Never sent to backend servers
+- Required for AI Explore functionality
+
+### Journey Data Structure
+```typescript
+interface ExploredJourney {
+  id: string
+  name: string // AI-generated name
+  path: JourneyTreeNode[] // Sequence from root to completion
+  confidence: number // 0-100
+  completionReason: string
+  steps: JourneyStep[] // Converted to manual format
+  status: 'pending' | 'confirmed' | 'discarded'
+}
+```
+
+### Adding Custom Logic
+To customize AI decisions:
+
+1. Modify noise filters in `aiDecisionService.ts`:
+```typescript
+private isNoiseElement(el: InteractableElement): boolean {
+  // Add custom patterns here
+}
+```
+
+2. Adjust system prompt in `aiDecisionService.ts`:
+```typescript
+private systemPrompt = `...your custom instructions...`
+```
+
+3. Change exploration strategy in config:
+```typescript
+explorationStrategy: 'depth-first' | 'breadth-first' | 'ai-guided'
+```
+
+### Debugging
+Enable detailed logging:
+```typescript
+console.log('🤖 [AI]', decision)
+console.log('📍 [EXPLORATION]', state)
+console.log('🎯 [JOURNEY]', journey)
+```
+
+All exploration events are logged with emoji prefixes for easy filtering.
+
+### Performance
+- Average API call: 1-3 seconds
+- Tokens per page: 500-1500 input, 200-500 output
+- Session cost: $0.05-$0.30 (typical 10-click exploration)
+
+For detailed usage guide, see [AI_EXPLORATION_GUIDE.md](./AI_EXPLORATION_GUIDE.md).
 
 ## Adding New Step Types
 
