@@ -142,19 +142,22 @@ class SimulationService {
               error: error instanceof Error ? error.message : 'Unknown error'
             })
 
-            // Update progress - error occurred
+            // Log warning but continue execution
+            console.warn(`⚠️ [SimulationService] Action failed but continuing: ${action.type} ${action.selector || ''}`)
+            console.warn(`⚠️ [SimulationService] Error: ${error instanceof Error ? error.message : 'Unknown error'}`)
+
+            // Update progress - warning occurred
             this.updateProgress({
               currentStepIndex: stepIndex,
               currentActionIndex: actionIndex,
               currentStep: step,
               currentAction: action,
-              status: 'error',
-              message: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+              status: 'running',
+              message: `⚠️ Failed: ${action.type} ${action.selector || ''} - continuing...`
             })
 
-            // Pause on error
-            this.isPaused = true
-            break
+            // DO NOT pause or break - continue with next action
+            await this.delay(500) // Visual delay before next action
           }
         }
 

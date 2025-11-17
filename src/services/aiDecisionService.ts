@@ -259,6 +259,62 @@ Journey name:`
   }
 
   /**
+   * Summarize mobile view hierarchy - keep interactive elements, remove noise
+   */
+  summarizeMobileViewHierarchy(hierarchy: string, maxLength: number = 8000): string {
+    if (hierarchy.length <= maxLength) return hierarchy
+
+    // Split into lines
+    const lines = hierarchy.split('\n')
+
+    // Priority levels for element types
+    const highPriority = ['UIButton', 'UITextField', 'UITextView', 'UISwitch', 'UISlider', 'UISegmentedControl']
+    const mediumPriority = ['UILabel', 'UIImageView', 'UITabBar', 'UINavigationBar', 'UITableViewCell']
+    const lowPriority = ['UIView', 'UIStackView', 'UIScrollView']
+    const containerOnly = ['UIWindow', 'UITransitionView', 'UIDropShadowView', 'UILayoutContainerView']
+
+    // Filter and prioritize lines
+    const prioritizedLines: { line: string, priority: number, hasAccessibility: boolean }[] = lines.map(line => {
+      let priority = 0
+
+      // Check element type
+      if (highPriority.some(type => line.includes(type))) priority = 100
+      else if (mediumPriority.some(type => line.includes(type))) priority = 50
+      else if (lowPriority.some(type => line.includes(type))) priority = 10
+      else if (containerOnly.some(type => line.includes(type))) priority = 1
+
+      // Boost priority if has accessibility identifier or label
+      const hasAccessibility = line.includes('accessibilityIdentifier') ||
+                               line.includes('accessibilityLabel') ||
+                               line.includes('text=')
+
+      if (hasAccessibility) priority += 50
+
+      return { line, priority, hasAccessibility }
+    })
+
+    // Sort by priority (highest first)
+    prioritizedLines.sort((a, b) => b.priority - a.priority)
+
+    // Take lines until we hit the limit
+    let result = ''
+    let currentLength = 0
+
+    for (const item of prioritizedLines) {
+      if (currentLength + item.line.length > maxLength) break
+      result += item.line + '\n'
+      currentLength += item.line.length + 1
+    }
+
+    // If result is still too long or too short, just take first N chars
+    if (result.length < 500) {
+      return hierarchy.substring(0, maxLength)
+    }
+
+    return result + '\n...(hierarchy truncated, showing most relevant interactive elements)'
+  }
+
+  /**
    * Check if two pages are similar (to detect loops)
    */
   arePagesSimular(context1: PageContext, context2: PageContext): boolean {
@@ -690,6 +746,128 @@ Now execute the step above.`
     } catch (error) {
       console.error('Step execution error:', error)
       throw new Error(`Failed to execute step: ${error}`)
+    }
+  }
+
+  /**
+   * Execute a single step from mobile text flow by finding elements in SDK view hierarchy
+   */
+  async executeMobileTextFlowStep(
+    stepDescription: string,
+    viewHierarchy: string,
+    screenName?: string
+  ): Promise<{
+    action: 'tap' | 'type' | 'swipe' | 'wait' | 'complete'
+    elementXPath?: string
+    elementDescription?: string
+    inputValue?: string
+    reasoning: string
+    success: boolean
+  }> {
+    if (!claudeService.isInitialized()) {
+      throw new Error('Claude service not initialized')
+    }
+
+    const prompt = `You are executing a specific step in a mobile app test flow. Find the right element from the view hierarchy and determine what action to take.
+
+Current Screen:
+${screenName ? `- Screen Name: ${screenName}` : '- Screen: Unknown'}
+
+Step to Execute:
+"${stepDescription}"
+
+View Hierarchy (iOS Debug Description Format):
+${this.summarizeMobileViewHierarchy(viewHierarchy, 8000)}
+
+Your task:
+1. Analyze the view hierarchy to find UI elements
+2. **CRITICAL**: If the step description includes "on element: X" (e.g., "click on element: Account button"), search for elements with:
+   - accessibilityLabel matching or containing "X" (case-insensitive)
+   - accessibilityIdentifier matching or containing "X" (case-insensitive)
+   - Button text matching or containing "X"
+3. Find the element that matches the step description and context
+4. Determine the mobile action (tap, type, swipe, or wait)
+5. Extract the accessibility identifier for the element
+6. **CRITICAL**: If the step description contains a value (e.g., "type with value 'asd'"), extract that EXACT value and return it in inputValue
+7. Provide clear reasoning
+
+View Hierarchy Format Notes:
+- Each line shows a UI element with its type (UIButton, UILabel, UITextField, etc.)
+- Elements may have accessibilityLabel, accessibilityIdentifier, or text content
+- Hierarchy is indented showing parent-child relationships
+- Look for interactive elements like buttons, text fields, switches, etc.
+
+**CRITICAL - Accessibility Identifier Extraction:**
+- ALWAYS prioritize accessibilityIdentifier over other attributes
+- Return ONLY the identifier value, NOT an XPath
+- If you see: accessibilityIdentifier="loginButton" → return "loginButton"
+- If you see: accessibilityIdentifier="usernameField" → return "usernameField"
+- If no accessibilityIdentifier exists, use accessibilityLabel value
+- DO NOT generate XPath selectors - mobile automation uses direct accessibility IDs
+
+**CRITICAL - Input Value Extraction:**
+- If step says "type with value 'X'" → extract 'X' and return as inputValue
+- If step says "type with value \"Y\"" → extract "Y" and return as inputValue
+- If step says "click" or "tap" → leave inputValue empty/null
+- Preserve the exact value including any special characters
+
+Respond in JSON format:
+{
+  "action": "tap" | "type" | "swipe" | "wait" | "complete",
+  "elementXPath": "accessibility identifier or label value (NOT an XPath)",
+  "elementDescription": "Human-readable description of the element",
+  "inputValue": "exact value from step description" (only if action is "type"),
+  "reasoning": "Why you chose this element and action",
+  "success": true/false
+}
+
+Action types:
+- "tap": Tap a button, link, or interactive element
+- "type": Fill a text field with text (must have inputValue)
+- "swipe": Swipe gesture (up, down, left, right)
+- "wait": Wait for something (use if no immediate action needed)
+- "complete": Step cannot be completed (element not found)
+
+Examples:
+
+Step: "tap"
+View Hierarchy contains: UIButton, accessibilityIdentifier="loginButton"
+Response: {"action": "tap", "elementXPath": "loginButton", "elementDescription": "Login button", "reasoning": "Found login button with identifier loginButton", "success": true}
+
+Step: "type with value 'admin'"
+View Hierarchy contains: UITextField, accessibilityIdentifier="usernameField"
+Response: {"action": "type", "elementXPath": "usernameField", "elementDescription": "Username text field", "inputValue": "admin", "reasoning": "Found username text field with identifier usernameField, will type 'admin'", "success": true}
+
+Step: "type with value \"password123\""
+View Hierarchy contains: UITextField, accessibilityIdentifier="passwordField"
+Response: {"action": "type", "elementXPath": "passwordField", "elementDescription": "Password text field", "inputValue": "password123", "reasoning": "Found password text field with identifier passwordField, will type 'password123'", "success": true}
+
+Step: "click on element: Account button"
+View Hierarchy contains: UIButton, accessibilityLabel="Account Details", accessibilityIdentifier="accountDetailsButton"
+Response: {"action": "tap", "elementXPath": "accountDetailsButton", "elementDescription": "Account Details button", "reasoning": "Found button with label 'Account Details' matching context 'Account button', using identifier accountDetailsButton", "success": true}
+
+Step: "click on element: Wealths tab"
+View Hierarchy contains: UIButton, accessibilityLabel="Wealth", frame=(x: 209, y: 710, width: 70, height: 48)
+Response: {"action": "tap", "elementXPath": "Wealth", "elementDescription": "Wealth tab button", "reasoning": "Found tab button with label 'Wealth' matching context 'Wealths tab', using accessibilityLabel as identifier", "success": true}
+
+Step: "click on element: Back button"
+View Hierarchy contains: UINavigationButton, accessibilityLabel="Back", accessibilityIdentifier="backButton"
+Response: {"action": "tap", "elementXPath": "backButton", "elementDescription": "Back navigation button", "reasoning": "Found navigation back button matching context 'Back button', using identifier backButton", "success": true}
+
+Now execute the mobile step above.`
+
+    try {
+      const response = await claudeService.askClaude(prompt, this.systemPrompt)
+      const jsonMatch = response.match(/\{[\s\S]*\}/)
+      if (!jsonMatch) {
+        throw new Error('Failed to parse AI response')
+      }
+
+      const result = JSON.parse(jsonMatch[0])
+      return result
+    } catch (error) {
+      console.error('Mobile step execution error:', error)
+      throw new Error(`Failed to execute mobile step: ${error}`)
     }
   }
 }

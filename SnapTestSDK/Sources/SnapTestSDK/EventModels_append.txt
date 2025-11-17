@@ -1,0 +1,9 @@
+
+// MARK: - View Hierarchy Response Event
+
+/// Response containing view hierarchy debug description
+struct ViewHierarchyResponse: SDKEvent {
+    let type: String = "viewHierarchyResponse"
+    let timestamp: TimeInterval = Date().timeIntervalSince1970
+    let hierarchy: String
+}

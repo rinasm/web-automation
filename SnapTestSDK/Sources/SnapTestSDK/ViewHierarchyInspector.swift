@@ -4,54 +4,141 @@ import UIKit
 class ViewHierarchyInspector {
 
     /// Get element info for a given view
-    /// Walks up the view hierarchy to find a parent with accessibilityIdentifier if the hit view doesn't have one
+    /// Uses NATIVE iOS recursive hierarchy traversal - NO HTTP calls!
     static func getElementInfo(for view: UIView) -> ElementInfo {
-        // Try to find a view with accessibilityIdentifier by walking up the hierarchy
-        let viewWithId = findViewWithAccessibilityId(startingFrom: view) ?? view
+        print("📍 [SDK] Capturing element at view: \(String(describing: type(of: view)))")
 
-        // IMPORTANT: Only generate xpath if NO accessibilityIdentifier was found
-        // This forces tests to use accessibilityId (much faster and more reliable!)
-        let xpath: String?
-        if viewWithId.accessibilityIdentifier != nil && !viewWithId.accessibilityIdentifier!.isEmpty {
-            xpath = nil // Don't generate xpath when we have accessibilityId
-            print("✅ [SDK] Using accessibilityId: \(viewWithId.accessibilityIdentifier!) (no xpath)")
-        } else {
-            xpath = generateXPath(for: viewWithId)
-            print("⚠️ [SDK] No accessibilityId found, using xpath: \(xpath ?? "nil")")
+        // Build ancestor chain from this view to root (for backwards compatibility)
+        var hierarchy: [ElementInfo.HierarchyElement] = []
+        var currentView: UIView? = view
+        var level = 0
+
+        while let v = currentView, level < 50 {
+            let frame = v.frame
+            let hierarchyElement = ElementInfo.HierarchyElement(
+                className: String(describing: type(of: v)),
+                accessibilityIdentifier: v.accessibilityIdentifier,
+                bounds: ElementInfo.Bounds(
+                    x: Double(frame.origin.x),
+                    y: Double(frame.origin.y),
+                    width: Double(frame.size.width),
+                    height: Double(frame.size.height)
+                ),
+                isInteractive: v.isUserInteractionEnabled
+            )
+
+            hierarchy.append(hierarchyElement)
+            currentView = v.superview
+            level += 1
         }
 
-        return ElementInfo(view: viewWithId, xpath: xpath)
+        // NATIVE APPROACH: Build complete hierarchy from window root
+        // This is INSTANT - no network calls!
+        print("🌳 [SDK] Building complete page hierarchy using native iOS APIs...")
+        let startTime = Date()
+
+        // Find the root window
+        let rootWindow = findRootWindow(from: view)
+        let completeHierarchy = buildCompleteHierarchy(from: rootWindow, depth: 0)
+
+        let elapsed = Date().timeIntervalSince(startTime)
+        print("✅ [SDK] Built complete hierarchy (\(completeHierarchy.count) characters) in \(String(format: "%.3f", elapsed))s")
+
+        // Return element info with COMPLETE page hierarchy
+        return ElementInfo(view: view, xpath: nil, hierarchy: hierarchy, viewHierarchyDebugDescription: completeHierarchy)
     }
 
-    /// Walk up the view hierarchy to find a view with an accessibilityIdentifier
-    /// This is crucial for SwiftUI where taps often hit child views, not the parent with the identifier
-    private static func findViewWithAccessibilityId(startingFrom view: UIView) -> UIView? {
-        var currentView: UIView? = view
+    /// Find the root window from a given view
+    private static func findRootWindow(from view: UIView) -> UIView {
+        var current: UIView = view
+        while let superview = current.superview {
+            current = superview
+        }
+        return current
+    }
 
-        print("🔍 [SDK DEBUG] Starting view hierarchy walk-up from: \(String(describing: type(of: view)))")
+    /// Build complete view hierarchy string recursively
+    /// This captures BOTH UIKit hierarchy AND accessibility elements (including SwiftUI!)
+    private static func buildCompleteHierarchy(from view: UIView, depth: Int) -> String {
+        var result = ""
+        let indent = String(repeating: "  ", count: depth)
 
-        // Walk up maximum 5 levels to avoid going too far up the hierarchy
-        for level in 0..<5 {
-            guard let view = currentView else {
-                print("🔍 [SDK DEBUG] Level \(level): currentView is nil, stopping")
-                break
-            }
+        // Get view details
+        let className = String(describing: type(of: view))
+        let frame = view.frame
+        let memoryAddr = String(format: "%p", unsafeBitCast(view, to: Int.self))
 
-            let className = String(describing: type(of: view))
-            let accessibilityId = view.accessibilityIdentifier
+        // Build element line with all properties
+        result += "\(indent)<\(className): \(memoryAddr)>; "
+        result += "frame = (\(frame.origin.x) \(frame.origin.y); \(frame.size.width) \(frame.size.height)); "
 
-            print("🔍 [SDK DEBUG] Level \(level): \(className), accessibilityId: \(accessibilityId ?? "nil")")
-
-            if let accessibilityId = view.accessibilityIdentifier, !accessibilityId.isEmpty {
-                print("✅ [SDK DEBUG] Found accessibilityId '\(accessibilityId)' at level \(level) on \(className)")
-                return view
-            }
-
-            currentView = view.superview
+        // Add accessibility properties
+        if let accessibilityId = view.accessibilityIdentifier, !accessibilityId.isEmpty {
+            result += "accessibilityIdentifier = '\(accessibilityId)'; "
+        }
+        if let accessibilityLabel = view.accessibilityLabel, !accessibilityLabel.isEmpty {
+            result += "accessibilityLabel = '\(accessibilityLabel)'; "
         }
 
-        print("❌ [SDK DEBUG] No accessibilityId found after walking up 5 levels")
-        return nil
+        // Add accessibility traits
+        let traits = view.accessibilityTraits
+        var traitsArray: [String] = []
+        if traits.contains(.button) { traitsArray.append("button") }
+        if traits.contains(.staticText) { traitsArray.append("text") }
+        if traits.contains(.image) { traitsArray.append("image") }
+        if traits.contains(.searchField) { traitsArray.append("searchField") }
+        if traits.contains(.link) { traitsArray.append("link") }
+        if !traitsArray.isEmpty {
+            result += "accessibilityTraits = [\(traitsArray.joined(separator: ", "))]; "
+        }
+
+        // Add interactive state
+        if view.isUserInteractionEnabled {
+            result += "userInteractionEnabled = YES; "
+        }
+        if view.isHidden {
+            result += "hidden = YES; "
+        }
+        result += "alpha = \(view.alpha); "
+
+        result += "\n"
+
+        // ALSO enumerate accessibility elements (catches SwiftUI buttons!)
+        // This is crucial for SwiftUI where button text is in accessibility tree
+        if let accessibilityElements = view.accessibilityElements as? [Any] {
+            for (index, element) in accessibilityElements.enumerated() {
+                if let accView = element as? UIView {
+                    let accFrame = accView.frame
+                    let accLabel = accView.accessibilityLabel ?? ""
+                    let accId = accView.accessibilityIdentifier ?? ""
+                    let accTraits = accView.accessibilityTraits
+
+                    var accTraitsStr = ""
+                    if accTraits.contains(.button) { accTraitsStr += "button " }
+                    if accTraits.contains(.staticText) { accTraitsStr += "text " }
+
+                    result += "\(indent)  [ACCESSIBILITY-ELEMENT-\(index)] <\(String(describing: type(of: accView)))>; "
+                    result += "frame = (\(accFrame.origin.x) \(accFrame.origin.y); \(accFrame.width) \(accFrame.height)); "
+                    if !accLabel.isEmpty {
+                        result += "accessibilityLabel = '\(accLabel)'; "
+                    }
+                    if !accId.isEmpty {
+                        result += "accessibilityIdentifier = '\(accId)'; "
+                    }
+                    if !accTraitsStr.isEmpty {
+                        result += "accessibilityTraits = [\(accTraitsStr.trimmingCharacters(in: .whitespaces))]; "
+                    }
+                    result += "\n"
+                }
+            }
+        }
+
+        // Recursively add all subviews
+        for subview in view.subviews {
+            result += buildCompleteHierarchy(from: subview, depth: depth + 1)
+        }
+
+        return result
     }
 
     /// Generate XPath-like selector for a view

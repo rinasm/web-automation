@@ -3,12 +3,20 @@ import Foundation
 
 /// Main SnapTest SDK entry point
 ///
-/// Usage:
+/// **Recommended Usage (Auto-Discovery):**
 /// ```swift
 /// import SnapTestSDK
 ///
 /// // In AppDelegate or SceneDelegate
-/// SnapTest.shared.start(serverURL: "ws://localhost:8080")
+/// #if DEBUG
+/// SnapTest.shared.start()  // Automatically discovers SnapTest Desktop via Bonjour
+/// #endif
+/// ```
+///
+/// **Manual Connection (if needed):**
+/// ```swift
+/// // Only use if Bonjour is not available or connecting to remote server
+/// SnapTest.shared.start(serverURL: "ws://192.168.1.100:8080")
 /// ```
 public class SnapTest {
 
@@ -34,11 +42,23 @@ public class SnapTest {
 
     // MARK: - Public API
 
-    /// Start SnapTest SDK with auto-discovery using Bonjour
+    /// Start SnapTest SDK with auto-discovery using Bonjour (RECOMMENDED)
     ///
     /// This will automatically discover SnapTest desktop app on the local network.
     /// No configuration needed - just call this method and it will connect automatically!
-    public func startWithAutoDiscovery() {
+    ///
+    /// This is the recommended way to start the SDK as it:
+    /// - Works across different networks without code changes
+    /// - No need to find or hardcode IP addresses
+    /// - Automatically reconnects if server restarts
+    ///
+    /// Usage:
+    /// ```swift
+    /// #if DEBUG
+    /// SnapTest.shared.start()  // Uses auto-discovery by default
+    /// #endif
+    /// ```
+    public func start() {
         print("🔵 [SnapTest SDK] Starting with Bonjour auto-discovery...")
 
         // Initialize touch event capture
@@ -50,15 +70,32 @@ public class SnapTest {
         bonjourDiscovery?.delegate = self
         bonjourDiscovery?.startDiscovery()
 
-        print("🔵 [SnapTest SDK] Auto-discovery started")
+        print("🔵 [SnapTest SDK] Auto-discovery started - searching for SnapTest Desktop...")
+    }
+
+    /// Start SnapTest SDK with auto-discovery using Bonjour
+    ///
+    /// Alias for `start()` - included for backward compatibility.
+    /// Consider using `start()` instead.
+    @available(*, deprecated, message: "Use start() instead for auto-discovery")
+    public func startWithAutoDiscovery() {
+        start()
     }
 
     /// Start SnapTest SDK with manual WebSocket connection to desktop app
     /// - Parameter serverURL: WebSocket server URL (e.g., "ws://192.168.1.100:8080")
     ///
-    /// Note: Consider using `startWithAutoDiscovery()` instead for automatic connection.
+    /// **⚠️ DEPRECATED - Use `start()` instead for automatic Bonjour discovery**
+    ///
+    /// This method is only needed if:
+    /// - You're connecting to a remote server (not on local network)
+    /// - Bonjour/mDNS is not available in your environment
+    /// - You need to test with a specific server URL
+    ///
+    /// For most use cases, use `start()` with auto-discovery instead.
     public func start(serverURL: String) {
-        print("🔵 [SnapTest SDK] Starting with server URL: \(serverURL)")
+        print("⚠️ [SnapTest SDK] Starting with manual server URL: \(serverURL)")
+        print("⚠️ [SnapTest SDK] Consider using start() with auto-discovery instead")
 
         // Initialize WebSocket manager
         webSocketManager = WebSocketManager(serverURL: serverURL)
@@ -69,7 +106,7 @@ public class SnapTest {
         touchEventCapture = TouchEventCapture()
         touchEventCapture?.delegate = self
 
-        print("🔵 [SnapTest SDK] Initialized successfully")
+        print("🔵 [SnapTest SDK] Initialized with manual connection")
     }
 
     /// Stop SnapTest SDK and disconnect from desktop app
@@ -103,6 +140,20 @@ public class SnapTest {
         print("⚪️ [SnapTest SDK] Recording stopped")
         isRecording = false
         touchEventCapture?.stopCapturing()
+    }
+
+    /// Send execution log to desktop app (for subprocess visibility)
+    public func sendExecutionLog(actionId: String, step: String, message: String, elementType: String? = nil, bounds: CGRect? = nil, centerPoint: CGPoint? = nil, tapStrategy: String? = nil) {
+        let logEvent = ExecutionLogEvent(
+            actionId: actionId,
+            step: step,
+            message: message,
+            elementType: elementType,
+            bounds: bounds,
+            centerPoint: centerPoint,
+            tapStrategy: tapStrategy
+        )
+        webSocketManager?.send(event: logEvent)
     }
 }
 
@@ -152,6 +203,40 @@ extension SnapTest: WebSocketManagerDelegate {
             webSocketManager?.send(event: pong)
         case .executeAction:
             handleExecuteAction(command)
+        case .getViewHierarchy:
+            handleGetViewHierarchy()
+        }
+    }
+
+    /// Handle get view hierarchy command from desktop app
+    private func handleGetViewHierarchy() {
+        print("🌳 [SnapTest SDK] Getting view hierarchy...")
+
+        // Execute on main thread since we're accessing UIKit
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+
+            // Get main window
+            guard let window = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .flatMap({ $0.windows })
+                .first(where: { $0.isKeyWindow }) else {
+                print("❌ [SnapTest SDK] No key window found")
+                let errorResponse = ViewHierarchyResponseEvent(error: "No key window found")
+                self.webSocketManager?.send(event: errorResponse)
+                return
+            }
+
+            // Build complete view hierarchy using ViewHierarchyInspector
+            let startTime = Date()
+            let hierarchy = ViewHierarchyInspector.getViewHierarchySnapshot(window: window)
+            let elapsed = Date().timeIntervalSince(startTime)
+
+            print("✅ [SnapTest SDK] View hierarchy captured (\(hierarchy.count) characters) in \(String(format: "%.3f", elapsed))s")
+
+            // Send response back to desktop
+            let response = ViewHierarchyResponseEvent(hierarchy: hierarchy)
+            self.webSocketManager?.send(event: response)
         }
     }
 
@@ -183,42 +268,75 @@ extension SnapTest: WebSocketManagerDelegate {
             return
         }
 
+        // CRITICAL: Execute ALL UIKit operations on main thread to avoid crashes
+        // This includes findElement (accesses UIView hierarchy) and executeTap
+        func executeOnMainThread<T>(_ block: () -> T) -> T {
+            if Thread.isMainThread {
+                return block()
+            } else {
+                return DispatchQueue.main.sync { block() }
+            }
+        }
+
         // Execute action based on type
         switch actionType.lowercased() {
         case "tap", "click":
-            guard let element = ActionExecutor.findElement(by: selector, in: window) else {
-                let duration = Int(Date().timeIntervalSince(startTime) * 1000)
-                // Include available identifiers in error message for debugging
-                let availableIds = ActionExecutor.getAvailableIdentifiers(in: window)
-                let idsString = availableIds.isEmpty ? "NONE" : availableIds.joined(separator: ", ")
-                let errorMsg = "Element not found: \(selector). Available IDs: [\(idsString)]"
-                sendActionResult(actionId: actionId, success: false, error: errorMsg, duration: duration)
-                return
+            result = executeOnMainThread {
+                guard let element = ActionExecutor.findElement(by: selector, in: window, actionId: actionId) else {
+                    let duration = Int(Date().timeIntervalSince(startTime) * 1000)
+                    // Differentiate error message based on selector type
+                    let errorMsg: String
+                    if selector.hasPrefix("/") {
+                        // XPath selector
+                        errorMsg = "Element not found by XPath: \(selector)"
+                    } else {
+                        // AccessibilityId selector - include available IDs
+                        let availableIds = ActionExecutor.getAvailableIdentifiers(in: window)
+                        let idsString = availableIds.isEmpty ? "NONE" : availableIds.joined(separator: ", ")
+                        errorMsg = "Element not found: \(selector). Available IDs: [\(idsString)]"
+                    }
+                    sendActionResult(actionId: actionId, success: false, error: errorMsg, duration: duration)
+                    return (false, errorMsg)
+                }
+
+                return ActionExecutor.executeTap(on: element, actionId: actionId)
             }
-            result = ActionExecutor.executeTap(on: element)
 
         case "type":
             guard let text = payload.value else {
                 sendActionResult(actionId: actionId, success: false, error: "Type action missing text value", duration: 0)
                 return
             }
-            guard let element = ActionExecutor.findElement(by: selector, in: window) else {
-                let duration = Int(Date().timeIntervalSince(startTime) * 1000)
-                // Include available identifiers in error message for debugging
-                let availableIds = ActionExecutor.getAvailableIdentifiers(in: window)
-                let idsString = availableIds.isEmpty ? "NONE" : availableIds.joined(separator: ", ")
-                let errorMsg = "Element not found: \(selector). Available IDs: [\(idsString)]"
-                sendActionResult(actionId: actionId, success: false, error: errorMsg, duration: duration)
-                return
+            result = executeOnMainThread {
+                guard let element = ActionExecutor.findElement(by: selector, in: window) else {
+                    let duration = Int(Date().timeIntervalSince(startTime) * 1000)
+                    // Differentiate error message based on selector type
+                    let errorMsg: String
+                    if selector.hasPrefix("/") {
+                        // XPath selector
+                        errorMsg = "Element not found by XPath: \(selector)"
+                    } else {
+                        // AccessibilityId selector - include available IDs
+                        let availableIds = ActionExecutor.getAvailableIdentifiers(in: window)
+                        let idsString = availableIds.isEmpty ? "NONE" : availableIds.joined(separator: ", ")
+                        errorMsg = "Element not found: \(selector). Available IDs: [\(idsString)]"
+                    }
+                    sendActionResult(actionId: actionId, success: false, error: errorMsg, duration: duration)
+                    return (false, errorMsg)
+                }
+
+                return ActionExecutor.executeType(on: element, text: text)
             }
-            result = ActionExecutor.executeType(on: element, text: text)
 
         case "swipe":
             guard let direction = payload.swipeDirection else {
                 sendActionResult(actionId: actionId, success: false, error: "Swipe action missing direction", duration: 0)
                 return
             }
-            result = ActionExecutor.executeSwipe(direction: direction, in: window)
+
+            result = executeOnMainThread {
+                return ActionExecutor.executeSwipe(direction: direction, in: window)
+            }
 
         default:
             sendActionResult(actionId: actionId, success: false, error: "Unknown action type: \(actionType)", duration: 0)

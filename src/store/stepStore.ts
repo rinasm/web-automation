@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { PlatformType } from '../types/feature'
 
-export type ActionType = 'click' | 'type' | 'hover' | 'wait' | 'assert'
+export type ActionType = 'click' | 'type' | 'hover' | 'wait' | 'assert' | 'swipe' | 'scroll'
 
 export interface Action {
   id: string
@@ -10,7 +10,10 @@ export interface Action {
   selector: string
   value?: string
   description?: string
+  context?: string  // Element context for AI decision-making (e.g., "Account button", "Wealths tab")
   isPassword?: boolean  // Track if this is a password field
+  swipeDirection?: string  // Swipe direction: 'up', 'down', 'left', 'right'
+  swipeDistance?: number  // Swipe distance in pixels
 }
 
 export interface RecordedEvent {

@@ -142,6 +142,17 @@ ipcMain.handle('sdk:send-message', async (_event, deviceId: string, message: any
   }
 });
 
+// SDK WebSocket - Refresh network detection and republish Bonjour service
+ipcMain.handle('sdk:refresh-network', async () => {
+  console.log(`🔄 [IPC] Refreshing network detection...`);
+
+  const wsServer = getWebSocketServer();
+  wsServer.refreshNetwork();
+
+  console.log(`✅ [IPC] Network refresh complete`);
+  return { success: true };
+});
+
 function generatePlaywrightCode(flow: any): string {
   const { name, steps } = flow;
 

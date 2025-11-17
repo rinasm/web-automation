@@ -100,7 +100,9 @@ export function convertEventToStep(event: RecordedEvent, index: number): Action 
         ...baseStep,
         type: 'swipe',
         selector: '',
-        value: event.swipeDirection || 'up',
+        value: '', // Keep value empty for swipe
+        swipeDirection: event.swipeDirection || 'up',
+        swipeDistance: event.swipeDistance,
         description:
           event.description ||
           `Swipe ${event.swipeDirection} (${Math.round(event.swipeDistance || 0)}px)`
@@ -111,7 +113,9 @@ export function convertEventToStep(event: RecordedEvent, index: number): Action 
         ...baseStep,
         type: 'scroll',
         selector: getElementSelector(event.element),
-        value: event.swipeDirection || 'down',
+        value: '', // Keep value empty for scroll
+        swipeDirection: event.swipeDirection || 'down',
+        swipeDistance: event.swipeDistance,
         description:
           event.description ||
           `Scroll ${event.swipeDirection} (${Math.round(event.swipeDistance || 0)}px)`

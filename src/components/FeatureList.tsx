@@ -11,12 +11,14 @@ import { useFeatureStore } from '../store/featureStore'
 import { usePlatformFilter } from '../hooks/usePlatformFilter'
 import { useSettingsStore } from '../store/settingsStore'
 import { useProjectStore } from '../store/projectStore'
+import { useMobileDeviceStore } from '../store/mobileDeviceStore'
 import { PlatformType, Feature } from '../types/feature'
 import { simulationService, SimulationProgress } from '../services/simulationService'
 import { codeGenerationService, GeneratedCode } from '../services/codeGenerationService'
 import { aiSelectorCaptureService, SelectorCaptureProgress } from '../services/aiSelectorCaptureService'
 import { CodeGenerationModal } from './CodeGenerationModal'
 import { PlatformIndicator } from './PlatformIndicator'
+import { MobileTextToFlowController } from '../services/mobileTextToFlowController'
 
 interface FeatureListProps {
   projectId: string
@@ -37,9 +39,11 @@ export function FeatureList({
   const { currentPlatform, getStepCount, getFeatureDescription, filterSteps } = usePlatformFilter(projectId)
   const { advancedMode } = useSettingsStore()
   const { getProjectById } = useProjectStore()
+  const { getCurrentDevice } = useMobileDeviceStore()
 
   const projectFeatures = getFeaturesByProject(projectId)
   const project = getProjectById(projectId)
+  const currentMobileDevice = getCurrentDevice()
 
   // Simulation state
   const [simulatingFeatureId, setSimulatingFeatureId] = useState<string | null>(null)
@@ -330,6 +334,120 @@ export function FeatureList({
     }
   }
 
+  const handleSimulateMobileTextFlow = async (featureId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+
+    console.log('🎯 [UI] handleSimulateMobileTextFlow called for feature:', featureId)
+    console.log('🎯 [UI] Current platform:', currentPlatform)
+    console.log('🎯 [UI] Current mobile device:', currentMobileDevice)
+
+    if (!currentPlatform || currentPlatform !== 'mobile') {
+      console.warn('⚠️ [UI] Not in mobile platform mode')
+      alert('Mobile text-to-flow simulation is only supported for mobile platform. Please switch to mobile mode.')
+      return
+    }
+
+    if (!currentMobileDevice) {
+      console.warn('⚠️ [UI] No mobile device connected')
+      alert('No mobile device connected. Please connect a device via SDK first.')
+      return
+    }
+
+    const feature = features.find(f => f.id === featureId)
+    if (!feature) {
+      console.warn('⚠️ [UI] Feature not found:', featureId)
+      return
+    }
+
+    const steps = filterSteps(feature)
+    console.log('🎯 [UI] Steps found:', steps.length, steps)
+    if (steps.length === 0) {
+      alert('No steps to simulate. Please generate steps first.')
+      return
+    }
+
+    setCapturingFeatureId(featureId)
+    setCaptureProgress({
+      currentStepIndex: 0,
+      totalSteps: steps.length,
+      status: 'running',
+      message: 'Starting mobile AI-guided simulation...'
+    })
+
+    try {
+      console.log('📱 [MOBILE TEXT-TO-FLOW] Starting simulation for feature:', feature.name)
+      console.log('📱 [MOBILE TEXT-TO-FLOW] Using device:', currentMobileDevice.name)
+
+      // Use bundle ID for SDK communication (not Appium device ID)
+      // The SDK WebSocket identifies devices by bundle ID, not by Appium's device ID format
+      const bundleId = project?.bundleId || 'com.rinasmusthafa.MyTodoApp'
+      console.log('📱 [MOBILE TEXT-TO-FLOW] Using bundle ID for SDK:', bundleId)
+
+      // Create controller with bundle ID
+      const controller = new MobileTextToFlowController(bundleId)
+
+      // Set up progress listener
+      controller.addEventListener((event) => {
+        console.log('📱 [MOBILE TEXT-TO-FLOW] Event:', event.type, event.data)
+
+        switch (event.type) {
+          case 'executing_step':
+            setCaptureProgress({
+              currentStepIndex: event.data.index,
+              totalSteps: event.data.total,
+              status: 'running',
+              message: `Executing step ${event.data.index + 1}/${event.data.total}...`
+            })
+            break
+          case 'getting_hierarchy':
+            setCaptureProgress(prev => ({
+              ...prev,
+              message: 'Getting view hierarchy from device...'
+            }))
+            break
+          case 'hierarchy_received':
+            setCaptureProgress(prev => ({
+              ...prev,
+              message: 'Analyzing view hierarchy with AI...'
+            }))
+            break
+        }
+      })
+
+      // Execute steps and get enriched steps with XPaths
+      const enrichedSteps = await controller.executeSteps(steps)
+
+      console.log('✅ [MOBILE TEXT-TO-FLOW] Enrichment complete. Updating feature...')
+
+      // Update feature with enriched steps
+      updateFeature(featureId, {
+        stepsMobile: enrichedSteps,
+        status: 'generated' as const
+      })
+
+      // Wait a bit to show completion
+      setTimeout(() => {
+        setCapturingFeatureId(null)
+      }, 2000)
+
+      alert('✅ XPaths captured successfully! Your mobile feature is now ready to simulate.')
+    } catch (error) {
+      console.error('Mobile text-to-flow simulation failed:', error)
+      setCaptureProgress({
+        currentStepIndex: 0,
+        totalSteps: steps.length,
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Simulation failed'
+      })
+
+      setTimeout(() => {
+        setCapturingFeatureId(null)
+      }, 3000)
+
+      alert(`Failed to simulate: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
+  }
+
   return (
     <div className="h-full flex flex-col bg-gray-50">
       {/* Header */}
@@ -404,8 +522,8 @@ export function FeatureList({
                   <div className="flex items-center gap-1">
                     {stepCount > 0 && (
                       <>
-                        {/* Capture Selectors button - only show when status is 'needs_selectors' */}
-                        {feature.status === 'needs_selectors' && (
+                        {/* Capture Selectors button - Web platform when status is 'needs_selectors' */}
+                        {feature.status === 'needs_selectors' && currentPlatform === 'web' && (
                           <button
                             onClick={(e) => handleCaptureSelectors(feature.id, e)}
                             className={`transition-colors p-1.5 rounded ${
@@ -414,6 +532,21 @@ export function FeatureList({
                                 : 'text-orange-600 hover:text-orange-800 hover:bg-orange-50'
                             }`}
                             title={anyCaptureInProgress && !isCapturing ? 'Another feature is being captured' : 'Capture XPath selectors using AI'}
+                            disabled={anyCaptureInProgress && !isCapturing}
+                          >
+                            <Target size={18} className={isCapturing ? 'animate-pulse' : ''} />
+                          </button>
+                        )}
+                        {/* Simulate & Find XPaths button - Mobile platform when status is 'needs_selectors' */}
+                        {feature.status === 'needs_selectors' && currentPlatform === 'mobile' && (
+                          <button
+                            onClick={(e) => handleSimulateMobileTextFlow(feature.id, e)}
+                            className={`transition-colors p-1.5 rounded ${
+                              anyCaptureInProgress && !isCapturing
+                                ? 'text-gray-400 cursor-not-allowed opacity-50'
+                                : 'text-purple-600 hover:text-purple-800 hover:bg-purple-50'
+                            }`}
+                            title={anyCaptureInProgress && !isCapturing ? 'Another feature is being simulated' : 'Simulate & Find XPaths with AI'}
                             disabled={anyCaptureInProgress && !isCapturing}
                           >
                             <Target size={18} className={isCapturing ? 'animate-pulse' : ''} />
@@ -504,7 +637,13 @@ export function FeatureList({
                   <div className="mb-3 p-2 bg-orange-50 border border-orange-200 rounded text-xs text-orange-800 flex items-start gap-2">
                     <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
                     <span>
-                      Selectors missing. Click the <Target size={12} className="inline" /> button to capture XPath using AI.
+                      {currentPlatform === 'web'
+                        ? 'Selectors missing. Click the '
+                        : 'XPaths missing. Click the '}
+                      <Target size={12} className="inline" />
+                      {currentPlatform === 'web'
+                        ? ' button to capture XPath using AI.'
+                        : ' button to simulate & find XPaths with AI.'}
                     </span>
                   </div>
                 )}

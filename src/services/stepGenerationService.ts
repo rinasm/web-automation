@@ -106,12 +106,19 @@ ${platform === 'web' ? `
 - Example selectors: "#email", "button[type='submit']", "[aria-label='Login']", "//input[@name='username']"
 - For text matching: Use attribute selectors like [aria-label], [title], [value], or XPath with text()
 ` : `
-**Mobile Testing (WebDriverIO):**
-- Actions: tap (click), type, swipe, scroll, wait, assert, screenshot
-- Selectors: Use accessibility IDs, iOS/Android-specific selectors
+**Mobile Testing (iOS/Android Native Apps):**
+- Actions: tap (same as click), type (fill text field), swipe, scroll, wait, assert, screenshot
+- Selectors: Use accessibility identifiers (not XPath) - will be captured later using SDK
 - Common patterns: Tap buttons, fill text fields, swipe gestures
-- Example selectors: "~loginButton", "android=new UiSelector().text('Login')"
-- Note: No hover action on mobile (convert to tap)
+- Example actions:
+  * type "username" into username field → ONE action: type with value "username"
+  * tap login button → ONE action: tap/click with no value
+  * enter "password" in password field → ONE action: type with value "password"
+- **CRITICAL**: Do NOT add separate "tap" or "click" actions before "type" actions
+- **CRITICAL**: Mobile text fields are auto-focused when tapped - just use "type" action directly
+- **CRITICAL**: Each step should have EXACTLY ONE action (either tap OR type, never both)
+- **CRITICAL**: For mobile apps, ALWAYS include a "context" field describing what element to interact with
+- Note: No hover action on mobile (not applicable)
 `}
 
 ${context?.url ? `\nApplication URL: ${context.url}` : ''}
@@ -125,23 +132,49 @@ Return a JSON array of steps. Each step should have:
   "actions": [
     {
       "type": "action_type",
-      "selector": "element_selector",
-      "value": "optional_value",
-      "description": "What this action does"
+      "selector": "",
+      "value": "exact_value_from_description",
+      "description": "What this action does",
+      "context": "element to interact with (e.g., 'Account button', 'Wealths tab', 'Back button')"
     }
   ],
   "order": step_number
 }
 
-**CRITICAL - Selector Generation Rules:**
+**CRITICAL - Action and Value Rules:**
+${platform === 'mobile' ? `
+- **Each step = ONE action only** (never combine tap + type in same step)
+- **For text input**: Extract the EXACT text value from the description and put it in the "value" field
+- **For taps/clicks**: Leave "value" empty or null
+- **Example breakdown**:
+  Input: "enter 'john@example.com' in email and 'password123' in password and click login"
+  Output:
+  [
+    {"name": "Enter email", "actions": [{"type": "type", "value": "john@example.com", "description": "Type email address", "context": "email field"}], "order": 0},
+    {"name": "Enter password", "actions": [{"type": "type", "value": "password123", "description": "Type password", "context": "password field"}], "order": 1},
+    {"name": "Click login button", "actions": [{"type": "click", "value": "", "description": "Tap login button", "context": "login button"}], "order": 2}
+  ]
+
+- **Example for navigation**:
+  Input: "Click on Account and go back. Click on Cards and go back."
+  Output:
+  [
+    {"name": "Click on Account", "actions": [{"type": "click", "value": "", "description": "Navigate to Account", "context": "Account button or tab"}], "order": 0},
+    {"name": "Go back from Account", "actions": [{"type": "click", "value": "", "description": "Navigate back", "context": "Back button or navigation back"}], "order": 1},
+    {"name": "Click on Cards", "actions": [{"type": "click", "value": "", "description": "Navigate to Cards", "context": "Cards button or tab"}], "order": 2},
+    {"name": "Go back from Cards", "actions": [{"type": "click", "value": "", "description": "Navigate back", "context": "Back button or navigation back"}], "order": 3}
+  ]
+` : `
 - DO NOT generate actual CSS or XPath selectors - they will not work
+`}
 - ALWAYS use empty string "" for the selector field
 - Users will capture the actual selectors using the visual selector capture tool
-- Focus on generating correct action types and descriptions
+- Focus on generating correct action types, values, and descriptions
 
 **Important:**
 - Break complex descriptions into atomic, testable steps
 - Each step should accomplish ONE clear objective
+- Extract exact text values from the description (preserve quotes content)
 - Actions should be in logical sequence
 - Be specific and actionable in descriptions`
 
@@ -181,6 +214,7 @@ Analyze the description and break it down into atomic steps with specific action
           const isPassword = action.type === 'type' && (
             action.selector?.toLowerCase().includes('password') ||
             action.description?.toLowerCase().includes('password') ||
+            action.context?.toLowerCase().includes('password') ||
             action.selector?.includes('[type="password"]') ||
             action.selector?.includes('[type=password]')
           )
@@ -191,6 +225,7 @@ Analyze the description and break it down into atomic steps with specific action
             selector: action.selector || '',
             value: isPassword && action.value ? '********' : action.value,  // Mask password values
             description: action.description,
+            context: action.context || '',  // Preserve context for AI decision-making
             isPassword
           }
         }),

@@ -62,6 +62,8 @@ struct ElementInfo: Codable {
     let isClickable: Bool
     let isEditable: Bool
     let xpath: String?
+    let hierarchy: [HierarchyElement]? // Ancestor chain from tapped element to root
+    let viewHierarchyDebugDescription: String? // Complete window hierarchy for instant element lookup
 
     struct Bounds: Codable {
         let x: Double
@@ -70,7 +72,14 @@ struct ElementInfo: Codable {
         let height: Double
     }
 
-    init(view: UIView, xpath: String?) {
+    struct HierarchyElement: Codable {
+        let className: String
+        let accessibilityIdentifier: String?
+        let bounds: Bounds
+        let isInteractive: Bool
+    }
+
+    init(view: UIView, xpath: String?, hierarchy: [HierarchyElement]? = nil, viewHierarchyDebugDescription: String? = nil) {
         self.className = String(describing: type(of: view))
         self.accessibilityIdentifier = view.accessibilityIdentifier
         self.accessibilityLabel = view.accessibilityLabel
@@ -99,6 +108,8 @@ struct ElementInfo: Codable {
         self.isClickable = view.isUserInteractionEnabled
         self.isEditable = view is UITextField || view is UITextView
         self.xpath = xpath
+        self.hierarchy = hierarchy
+        self.viewHierarchyDebugDescription = viewHierarchyDebugDescription
     }
 }
 
@@ -115,6 +126,7 @@ struct SDKCommand: Codable {
         case stopRecording
         case ping
         case executeAction
+        case getViewHierarchy
     }
 
     struct CommandPayload: Codable {
@@ -144,4 +156,80 @@ struct ActionResultEvent: SDKEvent {
     let success: Bool
     let error: String?
     let duration: Int // milliseconds
+}
+
+// MARK: - Execution Log Event
+
+/// Real-time execution log for subprocess visibility
+struct ExecutionLogEvent: SDKEvent {
+    let type: String = "executionLog"
+    let timestamp: TimeInterval = Date().timeIntervalSince1970
+    let actionId: String
+    let step: String // "find_element", "get_bounds", "calculate_center", "execute_tap"
+    let message: String
+    let data: LogData?
+
+    struct LogData: Codable {
+        let elementType: String?
+        let bounds: BoundsData?
+        let centerPoint: PointData?
+        let tapStrategy: String?
+    }
+
+    struct BoundsData: Codable {
+        let x: Double
+        let y: Double
+        let width: Double
+        let height: Double
+    }
+
+    struct PointData: Codable {
+        let x: Double
+        let y: Double
+    }
+
+    init(actionId: String, step: String, message: String, elementType: String? = nil, bounds: CGRect? = nil, centerPoint: CGPoint? = nil, tapStrategy: String? = nil) {
+        self.actionId = actionId
+        self.step = step
+        self.message = message
+
+        var boundsData: BoundsData? = nil
+        if let bounds = bounds {
+            boundsData = BoundsData(x: Double(bounds.origin.x), y: Double(bounds.origin.y), width: Double(bounds.width), height: Double(bounds.height))
+        }
+
+        var centerData: PointData? = nil
+        if let centerPoint = centerPoint {
+            centerData = PointData(x: Double(centerPoint.x), y: Double(centerPoint.y))
+        }
+
+        if elementType != nil || boundsData != nil || centerData != nil || tapStrategy != nil {
+            self.data = LogData(elementType: elementType, bounds: boundsData, centerPoint: centerData, tapStrategy: tapStrategy)
+        } else {
+            self.data = nil
+        }
+    }
+}
+
+// MARK: - View Hierarchy Response Event
+
+/// Response to getViewHierarchy command with complete view hierarchy
+struct ViewHierarchyResponseEvent: SDKEvent {
+    let type: String = "viewHierarchyResponse"
+    let timestamp: TimeInterval = Date().timeIntervalSince1970
+    let success: Bool
+    let hierarchy: String?
+    let error: String?
+
+    init(hierarchy: String) {
+        self.success = true
+        self.hierarchy = hierarchy
+        self.error = nil
+    }
+
+    init(error: String) {
+        self.success = false
+        self.hierarchy = nil
+        self.error = error
+    }
 }

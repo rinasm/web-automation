@@ -28,6 +28,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onSDKActionResult: (callback: (data: { deviceId: string; result: any }) => void) => {
     ipcRenderer.on('sdk:sdk-action-result', (_event, data) => callback(data));
   },
+  onSDKExecutionLog: (callback: (data: { deviceId: string; log: any }) => void) => {
+    ipcRenderer.on('sdk:sdk-execution-log', (_event, data) => callback(data));
+  },
+  onSDKViewHierarchyResponse: (callback: (data: { deviceId: string; response: any }) => void) => {
+    ipcRenderer.on('sdk:sdk-view-hierarchy-response', (_event, data) => callback(data));
+  },
 
   // Send command to SDK (start/stop recording)
   sendSDKCommand: (deviceId: string, commandType: 'startRecording' | 'stopRecording') => {
@@ -39,6 +45,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('sdk:send-message', deviceId, message);
   },
 
+  // Refresh network detection and republish Bonjour service
+  refreshSDKNetwork: () => {
+    return ipcRenderer.invoke('sdk:refresh-network');
+  },
+
   // Remove SDK event listeners
   removeSDKListeners: () => {
     ipcRenderer.removeAllListeners('sdk:sdk-connected');
@@ -47,6 +58,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('sdk:server-started');
     ipcRenderer.removeAllListeners('sdk:server-error');
     ipcRenderer.removeAllListeners('sdk:sdk-action-result');
+    ipcRenderer.removeAllListeners('sdk:sdk-execution-log');
+    ipcRenderer.removeAllListeners('sdk:sdk-view-hierarchy-response');
   },
 });
 
@@ -64,8 +77,11 @@ export interface ElectronAPI {
   onSDKServerStarted: (callback: (port: number) => void) => void;
   onSDKServerError: (callback: (error: string) => void) => void;
   onSDKActionResult: (callback: (data: { deviceId: string; result: any }) => void) => void;
+  onSDKExecutionLog: (callback: (data: { deviceId: string; log: any }) => void) => void;
+  onSDKViewHierarchyResponse: (callback: (data: { deviceId: string; response: any }) => void) => void;
   sendSDKCommand: (deviceId: string, commandType: 'startRecording' | 'stopRecording') => Promise<{ success: boolean; error?: string }>;
   sendToMobileDevice: (deviceId: string, message: any) => Promise<{ success: boolean; error?: string }>;
+  refreshSDKNetwork: () => Promise<{ success: boolean }>;
   removeSDKListeners: () => void;
 }
 

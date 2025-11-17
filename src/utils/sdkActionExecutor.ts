@@ -47,6 +47,7 @@ export class SDKActionExecutor {
     const actionId = `action_${this.deviceId}_${Date.now()}_${this.actionCounter++}`
 
     console.log(`📱 [SDKActionExecutor] Executing action: ${action.type} (${actionId})`)
+    console.log(`📱 [SDKActionExecutor] Action object:`, JSON.stringify(action, null, 2))
 
     // Map action type
     let actionType = action.type
@@ -63,9 +64,12 @@ export class SDKActionExecutor {
         actionType,
         selector: action.selector,
         value: action.value,
-        swipeDirection: action.value // For swipe actions
+        swipeDirection: action.swipeDirection, // Swipe/scroll direction
+        swipeDistance: action.swipeDistance // Swipe/scroll distance in pixels
       }
     }
+
+    console.log(`📱 [SDKActionExecutor] Command payload:`, JSON.stringify(command.payload, null, 2))
 
     // Send command via WebSocket
     const result = await this.sendCommandAndWait(actionId, command)
@@ -94,10 +98,11 @@ export class SDKActionExecutor {
       const result = await this.executeAction(action)
       results.push(result)
 
-      // Stop execution if action fails
+      // Log warning if action fails but continue execution
       if (!result.success) {
-        console.error(`📱 [SDKActionExecutor] Stopping execution due to failure at action: ${action.type}`)
-        break
+        console.warn(`⚠️ [SDKActionExecutor] Action failed: ${action.type} - ${result.error || 'Unknown error'}`)
+        console.warn(`⚠️ [SDKActionExecutor] Continuing with remaining actions...`)
+        // Continue instead of breaking - DO NOT STOP on errors
       }
     }
 
@@ -212,6 +217,34 @@ class SDKActionExecutorManager {
     window.electronAPI.onSDKActionResult((data: { deviceId: string; result: any }) => {
       console.log(`📊 [SDKActionExecutorManager] Received action result for device: ${data.deviceId}`)
       this.handleActionResult(data.deviceId, data.result)
+    })
+
+    // Listen for execution logs and display with green styling
+    window.electronAPI.onSDKExecutionLog((data: { deviceId: string; log: any }) => {
+      const log = data.log
+
+      // Build detailed message
+      let message = `🟢 [EXECUTION] Action ${log.actionId} - Step: ${log.step}\n   ${log.message}`
+
+      if (log.data) {
+        if (log.data.elementType) {
+          message += `\n   Element Type: ${log.data.elementType}`
+        }
+        if (log.data.bounds) {
+          const b = log.data.bounds
+          message += `\n   Bounds: (x: ${b.x}, y: ${b.y}, width: ${b.width}, height: ${b.height})`
+        }
+        if (log.data.centerPoint) {
+          const c = log.data.centerPoint
+          message += `\n   Center Point: (${c.x}, ${c.y})`
+        }
+        if (log.data.tapStrategy) {
+          message += `\n   Tap Strategy: ${log.data.tapStrategy}`
+        }
+      }
+
+      // Display with green color styling
+      console.log(`%c${message}`, 'color: #00ff00; font-weight: bold; background-color: #001a00; padding: 4px;')
     })
 
     this.isListenerSetup = true

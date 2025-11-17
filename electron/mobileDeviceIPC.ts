@@ -42,6 +42,18 @@ export const IPC_CHANNELS = {
   APPIUM_DELETE_SESSION: 'mobile:appium-delete-session',
   APPIUM_SESSION_COMMAND: 'mobile:appium-session-command',
 
+  // WebDriverAgent Element Lookup
+  WDA_FIND_ELEMENT_AT_COORDINATES: 'mobile:wda-find-element-at-coordinates',
+
+  // SDK Hierarchy Lookup (instant, no network delay!)
+  SDK_HIERARCHY_LOOKUP: 'mobile:sdk-hierarchy-lookup',
+
+  // Get complete page source XML
+  GET_PAGE_SOURCE: 'mobile:get-page-source',
+
+  // Parse iOS debugDescription (INSTANT - uses iOS native API!)
+  PARSE_DEBUG_DESCRIPTION: 'mobile:parse-debug-description',
+
   // Connection Status
   CONNECTION_STATUS: 'mobile:connection-status',
   CONNECTION_ERROR: 'mobile:connection-error'
@@ -345,6 +357,111 @@ export function setupMobileDeviceIPC(ipcMain: any) {
     } catch (error: any) {
       console.error('📱 [IPC] Appium command error:', error)
       return { success: false, error: error.message }
+    }
+  })
+
+  // WebDriverAgent element lookup handler
+  ipcMain.handle(IPC_CHANNELS.WDA_FIND_ELEMENT_AT_COORDINATES, async (_event: any, { sessionId, x, y }: any) => {
+    console.log(`🔍 [IPC] WDA element lookup at (${x}, ${y})`)
+
+    try {
+      const { findElementAtCoordinates } = require('./wdaElementLookup')
+      const elementInfo = await findElementAtCoordinates(sessionId, x, y)
+
+      if (elementInfo) {
+        console.log(`✅ [IPC] Found element: ${elementInfo.accessibilityId || 'no ID'}`)
+        return { success: true, elementInfo }
+      } else {
+        console.log(`❌ [IPC] No element found at (${x}, ${y})`)
+        return { success: false, error: 'No element found at coordinates' }
+      }
+    } catch (error: any) {
+      console.error('❌ [IPC] WDA element lookup error:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // SDK hierarchy lookup handler (INSTANT - no network delay!)
+  ipcMain.handle(IPC_CHANNELS.SDK_HIERARCHY_LOOKUP, async (_event: any, { hierarchy, x, y }: any) => {
+    console.log(`🔍 [IPC] SDK hierarchy lookup at (${x}, ${y})`)
+    console.log(`🔍 [IPC] Processing ${hierarchy?.length || 0} ancestors`)
+
+    try {
+      const { findElementInHierarchy } = require('./sdkHierarchyLookup')
+      const elementInfo = await findElementInHierarchy(hierarchy, x, y)
+
+      if (elementInfo) {
+        console.log(`✅ [IPC] Found element: ${elementInfo.accessibilityId || 'no ID'} (INSTANT!)`)
+        return { success: true, elementInfo }
+      } else {
+        console.log(`❌ [IPC] No element with accessibility ID found in hierarchy`)
+        return { success: false, error: 'No element found in hierarchy' }
+      }
+    } catch (error: any) {
+      console.error('❌ [IPC] SDK hierarchy lookup error:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Get page source XML handler
+  ipcMain.handle(IPC_CHANNELS.GET_PAGE_SOURCE, async (_event: any, { sessionId }: any) => {
+    console.log('📄 [IPC] Fetching complete page source XML')
+
+    try {
+      const fetch = require('node-fetch')
+      const response = await fetch(`http://127.0.0.1:4723/session/${sessionId}/source`)
+      const data = await response.json()
+
+      if (data.value) {
+        console.log(`✅ [IPC] Page source fetched successfully (${data.value.length} characters)`)
+        return { success: true, pageSource: data.value }
+      } else {
+        console.log('❌ [IPC] No page source in response')
+        return { success: false, error: 'No page source returned' }
+      }
+    } catch (error: any) {
+      console.error('❌ [IPC] Get page source error:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  // Parse iOS debugDescription handler (INSTANT - uses iOS native API!)
+  ipcMain.handle(IPC_CHANNELS.PARSE_DEBUG_DESCRIPTION, async (_event: any, { debugDescription, x, y }: any) => {
+    const startTime = Date.now()
+    console.log(`🚀 [IPC] Parsing iOS debugDescription at (${x}, ${y})`)
+    console.log(`🚀 [IPC] debugDescription length: ${debugDescription.length} characters`)
+
+    try {
+      // 🎯 USE NEW HIERARCHY ELEMENT FINDER (fixes wrong element recording!)
+      const { parseViewHierarchy, findElementAtCoordinates } = require('./hierarchyElementFinder')
+
+      // Parse hierarchy into tree structure
+      const hierarchy = parseViewHierarchy(debugDescription)
+
+      // Find actual clickable element at coordinates
+      const element = hierarchy ? findElementAtCoordinates(hierarchy, x, y, {
+        preferClickable: true,
+        returnDeepest: true
+      }) : null
+
+      // Map ViewNode to expected result format
+      const result = element ? {
+        accessibilityId: element.accessibilityIdentifier,
+        className: element.className
+      } : null
+
+      const elapsed = Date.now() - startTime
+      if (result) {
+        console.log(`✅ [iOS Parser] Found accessibility ID: ${result.accessibilityId} in ${elapsed}ms`)
+        return { success: true, accessibilityId: result.accessibilityId, className: result.className, elapsed }
+      } else {
+        console.log(`❌ [iOS Parser] No element found in debugDescription at (${x}, ${y})`)
+        return { success: false, error: 'No element found in debugDescription', elapsed }
+      }
+    } catch (error: any) {
+      const elapsed = Date.now() - startTime
+      console.error('❌ [iOS Parser] Parse debugDescription error:', error)
+      return { success: false, error: error.message, elapsed }
     }
   })
 

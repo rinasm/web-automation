@@ -127,11 +127,20 @@ class WebSocketManager: WebSocketDelegate {
     // MARK: - Message Handling
 
     private func handleReceivedText(_ text: String) {
-        guard let data = text.data(using: .utf8) else { return }
+        print("📥 [WebSocketManager] ===== RAW MESSAGE RECEIVED =====")
+        print("📥 [WebSocketManager] \(text)")
+        print("📥 [WebSocketManager] ==================================")
+
+        guard let data = text.data(using: .utf8) else {
+            print("❌ [WebSocketManager] Failed to convert text to data")
+            return
+        }
 
         // Try to parse as generic JSON first to check message type
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let type = json["type"] as? String {
+
+            print("📥 [WebSocketManager] Parsed message type: \(type)")
 
             // Handle informational messages (welcome, handshake-ack, etc.)
             if type == "welcome" || type == "handshake-ack" {
@@ -145,9 +154,12 @@ class WebSocketManager: WebSocketDelegate {
             let decoder = JSONDecoder()
             // Desktop sends camelCase keys
             let command = try decoder.decode(SDKCommand.self, from: data)
+            print("✅ [WebSocketManager] Successfully decoded command: \(command.type)")
             delegate?.webSocketDidReceiveCommand(command)
         } catch {
-            print("⚠️ [WebSocketManager] Received unknown message type: \(text)")
+            print("❌ [WebSocketManager] Failed to decode message as SDKCommand")
+            print("❌ [WebSocketManager] Error: \(error)")
+            print("❌ [WebSocketManager] Message was: \(text)")
         }
     }
 }

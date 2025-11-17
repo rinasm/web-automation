@@ -141,6 +141,147 @@ class TouchEventCapture: NSObject, UITextFieldDelegate {
         print("👆 [TouchEventCapture] Removed gesture recognizers")
     }
 
+    // MARK: - Element Selection Helper
+
+    /// Finds the best interactive element from a hit view, skipping non-interactive overlays
+    private func findInteractiveElement(from view: UIView?) -> UIView? {
+        guard var currentView = view else {
+            print("      🔍 findInteractiveElement: nil input")
+            return nil
+        }
+
+        print("      🔍 findInteractiveElement: Starting traversal from \(String(describing: type(of: currentView)))")
+
+        // Walk up the view hierarchy until we find an interactive element
+        var depth = 0
+        let maxDepth = 10 // Prevent infinite loops
+
+        while depth < maxDepth {
+            let currentId = currentView.accessibilityIdentifier ?? "(no ID)"
+            print("         [Depth \(depth)] Checking: \(String(describing: type(of: currentView))) - ID: '\(currentId)'")
+
+            // Check if this view should be skipped
+            if shouldSkipView(currentView) {
+                print("         [Depth \(depth)] ❌ SKIPPED - moving to parent")
+                // Move to parent
+                if let parent = currentView.superview {
+                    currentView = parent
+                    depth += 1
+                    continue
+                } else {
+                    print("         [Depth \(depth)] ⚠️ No parent - reached top of hierarchy")
+                    break
+                }
+            }
+
+            // This view is good!
+            print("         [Depth \(depth)] ✅ ACCEPTED - using this view")
+            return currentView
+        }
+
+        // Fallback to original view if we couldn't find better
+        print("      🔍 findInteractiveElement: Fallback to original view")
+        return view
+    }
+
+    /// Find the first tappable child (UIButton/UIControl) in a view hierarchy
+    /// This ensures we record the actual button, not the container
+    private func findTappableChild(in view: UIView) -> UIView? {
+        // If the view itself is a tappable control, return it
+        if view is UIButton {
+            return view
+        }
+        if view is UIControl, !(view is UITextField), !(view is UITextView) {
+            return view
+        }
+
+        // Search children recursively (breadth-first to prefer closer elements)
+        for subview in view.subviews {
+            if let button = subview as? UIButton {
+                return button
+            }
+            if let control = subview as? UIControl,
+               !(control is UITextField), !(control is UITextView) {
+                return control
+            }
+        }
+
+        // If no direct children are tappable, recurse deeper
+        for subview in view.subviews {
+            if let tappable = findTappableChild(in: subview) {
+                return tappable
+            }
+        }
+
+        return nil
+    }
+
+    /// Determines if a view should be skipped during element selection
+    private func shouldSkipView(_ view: UIView) -> Bool {
+        let className = String(describing: type(of: view))
+        let identifier = view.accessibilityIdentifier ?? "nil"
+
+        // Debug logging
+        print("🔍 [TouchEventCapture] Checking view: \(className), ID: \(identifier), Interactive: \(view.isUserInteractionEnabled), Alpha: \(view.alpha)")
+
+        // PRIORITY 1: Skip known overlay identifiers FIRST (most important!)
+        // These are ALWAYS skipped regardless of other properties
+        if let accessibilityId = view.accessibilityIdentifier {
+            let skipIdentifiers = [
+                "AdditionalDimmingOverlay",
+                "DimmingOverlay",
+                "BackdropView",
+                "TouchBlocker",
+                "PocketMask",
+                "ModalOverlay",
+                "SheetDimming"
+            ]
+
+            if skipIdentifiers.contains(accessibilityId) {
+                print("   ✅ SKIPPING: Matched skip identifier '\(accessibilityId)'")
+                return true
+            }
+        }
+
+        // PRIORITY 2: Skip known overlay class names
+        let skipClassNames = [
+            "AdditionalDimmingOverlay",
+            "DimmingView",
+            "BackdropView",
+            "TouchBlocker",
+            "PocketMask",
+            "PocketBlur",
+            "LuminanceAdjustment",
+            "_UIScrollPocket",
+            "_UIPointerInteractionAssistantEffectContainerView",
+            "FloatingBarContainerView",
+            "UIDimmingView",
+            "_UISheetDimmingView"
+        ]
+
+        for skipName in skipClassNames {
+            if className.contains(skipName) {
+                print("   ✅ SKIPPING: Matched skip class name '\(skipName)' in '\(className)'")
+                return true
+            }
+        }
+
+        // PRIORITY 3: Skip if user interaction is disabled (general check)
+        if !view.isUserInteractionEnabled {
+            print("   ✅ SKIPPING: User interaction disabled")
+            return true
+        }
+
+        // PRIORITY 4: Skip if nearly invisible (likely a decorative overlay)
+        if view.alpha < 0.1 {
+            print("   ✅ SKIPPING: Alpha too low (\(view.alpha))")
+            return true
+        }
+
+        print("   ⚪ NOT SKIPPING: This view is acceptable")
+        return false
+    }
+
     // MARK: - Gesture Handlers
 
     @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
@@ -150,12 +291,63 @@ class TouchEventCapture: NSObject, UITextFieldDelegate {
         }
 
         let location = recognizer.location(in: recognizer.view)
+
+        // STEP 1: Hit test to find deepest view at tap coordinates
         let hitView = recognizer.view?.hitTest(location, with: nil)
+        print("👆 [TouchEventCapture] ============ TAP DETECTED ============")
+        print("   📍 Screen coordinates: (x: \(location.x), y: \(location.y))")
+        print("   🎯 hitTest returned: \(String(describing: type(of: hitView)))")
+        if let hitView = hitView {
+            let hitId = hitView.accessibilityIdentifier ?? "(no ID)"
+            let hitFrame = hitView.frame
+            print("      └─ ID: '\(hitId)'")
+            print("      └─ Frame: (x: \(hitFrame.origin.x), y: \(hitFrame.origin.y), width: \(hitFrame.width), height: \(hitFrame.height))")
+        }
 
-        print("👆 [TouchEventCapture] Tap at \(location)")
+        // STEP 2: Find interactive element (walk up hierarchy, skip overlays)
+        let targetView = findInteractiveElement(from: hitView)
+        print("   🔍 findInteractiveElement returned: \(String(describing: type(of: targetView)))")
+        if let targetView = targetView {
+            let targetId = targetView.accessibilityIdentifier ?? "(no ID)"
+            let targetFrame = targetView.frame
+            print("      └─ ID: '\(targetId)'")
+            print("      └─ Frame: (x: \(targetFrame.origin.x), y: \(targetFrame.origin.y), width: \(targetFrame.width), height: \(targetFrame.height))")
 
-        // Get element info
-        let elementInfo = hitView.map { ViewHierarchyInspector.getElementInfo(for: $0) }
+            // CRITICAL: Validate that tap coordinates are within this view's absolute bounds
+            if !isPointInside(location, view: targetView, window: recognizer.view as? UIWindow) {
+                print("      ⚠️ WARNING: Tap coordinates NOT inside targetView bounds!")
+                print("      ⚠️ This view is WRONG - coordinates don't match!")
+            }
+        }
+
+        // STEP 3: Find actual tappable child if targetView is a container
+        let finalView = targetView.map { view in
+            print("   🔎 Searching for tappable child in: \(String(describing: type(of: view)))")
+            if let tappableChild = findTappableChild(in: view) {
+                let childId = tappableChild.accessibilityIdentifier ?? "(no ID)"
+                print("      ✅ Found tappable child: \(type(of: tappableChild)) - ID: '\(childId)'")
+                return tappableChild
+            } else {
+                print("      ⚪ No tappable child found, using container")
+                return view
+            }
+        }
+
+        // STEP 4: Final validation and recording
+        if let finalView = finalView {
+            let finalId = finalView.accessibilityIdentifier ?? "(no ID)"
+            print("   ✅ FINAL RECORDED ELEMENT: \(type(of: finalView)) - ID: '\(finalId)'")
+
+            // Double-check coordinates are inside final view
+            if !isPointInside(location, view: finalView, window: recognizer.view as? UIWindow) {
+                print("      ❌ CRITICAL ERROR: Tap coordinates NOT inside final view!")
+                print("      ❌ This will cause incorrect recording!")
+            }
+        }
+        print("   ============================================")
+
+        // Get element info from the actual tappable element
+        let elementInfo = finalView.map { ViewHierarchyInspector.getElementInfo(for: $0) }
 
         // Create touch event
         let event = TouchEvent(
@@ -168,6 +360,17 @@ class TouchEventCapture: NSObject, UITextFieldDelegate {
         delegate?.didCaptureTouchEvent(event)
     }
 
+    /// Validate that a point is inside a view's absolute bounds
+    private func isPointInside(_ point: CGPoint, view: UIView, window: UIWindow?) -> Bool {
+        guard let window = window else { return false }
+
+        // Convert view's frame to window coordinates
+        let absoluteFrame = view.convert(view.bounds, to: window)
+
+        // Check if point is inside
+        return absoluteFrame.contains(point)
+    }
+
     @objc private func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {
         guard isCapturing else { return }
 
@@ -176,11 +379,26 @@ class TouchEventCapture: NSObject, UITextFieldDelegate {
 
             let location = recognizer.location(in: recognizer.view)
             let hitView = recognizer.view?.hitTest(location, with: nil)
+            let targetView = findInteractiveElement(from: hitView)
 
-            print("👆 [TouchEventCapture] Long press at \(location)")
+            // CRITICAL: Find the actual tappable child if targetView is a container
+            // This ensures we record the button, not the container
+            let finalView = targetView.map { view in
+                if let tappableChild = findTappableChild(in: view) {
+                    print("👆 [TouchEventCapture] Long press at \(location)")
+                    print("   ↳ Found tappable child: \(type(of: tappableChild)) inside container: \(type(of: view))")
+                    return tappableChild
+                } else {
+                    print("👆 [TouchEventCapture] Long press at \(location)")
+                    if hitView !== targetView {
+                        print("   ↳ Skipped non-interactive overlay, using: \(String(describing: type(of: targetView)))")
+                    }
+                    return view
+                }
+            }
 
-            // Get element info
-            let elementInfo = hitView.map { ViewHierarchyInspector.getElementInfo(for: $0) }
+            // Get element info from the actual tappable element
+            let elementInfo = finalView.map { ViewHierarchyInspector.getElementInfo(for: $0) }
 
             // Create touch event
             let event = TouchEvent(
@@ -232,7 +450,11 @@ class TouchEventCapture: NSObject, UITextFieldDelegate {
             print("👆 [TouchEventCapture] Swipe \(direction) from \(startPoint) to \(endPoint)")
 
             let hitView = recognizer.view?.hitTest(startPoint, with: nil)
-            let elementInfo = hitView.map { ViewHierarchyInspector.getElementInfo(for: $0) }
+            let targetView = findInteractiveElement(from: hitView)
+            if hitView !== targetView {
+                print("   ↳ Skipped non-interactive overlay, using: \(String(describing: type(of: targetView)))")
+            }
+            let elementInfo = targetView.map { ViewHierarchyInspector.getElementInfo(for: $0) }
 
             // Create touch event
             let event = TouchEvent(
@@ -654,6 +876,14 @@ extension TouchEventCapture {
             object: nil
         )
 
+        // TEST: Register for test flash green notification
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleTestFlashGreen(_:)),
+            name: NSNotification.Name("TestFlashGreen"),
+            object: nil
+        )
+
         print("👆 [TouchEventCapture] Started observing keyboard notifications for SwiftUI text fields")
     }
 
@@ -711,6 +941,52 @@ extension TouchEventCapture {
         // Clear tracked SwiftUI fields
         observingSwiftUITextFields.removeAll()
         swiftUITextFieldValues.removeAll()
+    }
+
+    /// TEST: Handle test flash green notification
+    @objc private func handleTestFlashGreen(_ notification: Notification) {
+        print("🟢 [TEST] Received TestFlashGreen notification")
+
+        guard let buttonId = notification.userInfo?["buttonId"] as? String else {
+            print("❌ [TEST] No buttonId in notification")
+            return
+        }
+
+        print("🟢 [TEST] Looking for button with id: \(buttonId)")
+
+        // Find the button in the view hierarchy
+        guard let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) else {
+            print("❌ [TEST] No key window found")
+            return
+        }
+
+        guard let button = ActionExecutor.findElement(by: buttonId, in: window) else {
+            print("❌ [TEST] Button not found: \(buttonId)")
+            return
+        }
+
+        print("🟢 [TEST] Found button at frame: \(button.frame)")
+
+        DispatchQueue.main.async {
+            // Convert button frame to window coordinates
+            let frameInWindow = button.convert(button.bounds, to: window)
+            print("🟢 [TEST] Button frame in window: \(frameInWindow)")
+
+            // Create a green overlay at window level
+            let overlay = UIView(frame: frameInWindow)
+            overlay.backgroundColor = UIColor.green.withAlphaComponent(0.7)
+            overlay.isUserInteractionEnabled = false
+            overlay.tag = 99999
+            window.addSubview(overlay)
+            window.bringSubviewToFront(overlay)
+
+            print("🟢 [TEST] Green overlay added to WINDOW (not button)")
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                overlay.removeFromSuperview()
+                print("🟢 [TEST] Green overlay removed from window")
+            }
+        }
     }
 
     /// Capture final values for all observed UITextFields

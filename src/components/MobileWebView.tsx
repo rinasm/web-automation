@@ -193,14 +193,17 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
         // Check for failures
         const failedActions = results.filter(r => !r.success)
         if (failedActions.length > 0) {
-          const firstError = failedActions[0]
-          throw new Error(`Action failed: ${firstError.error}`)
+          // Log warning but don't throw - allow execution to continue
+          console.warn(`⚠️ [MobileWebView] ${failedActions.length}/${actions.length} actions failed, but continuing`)
+          failedActions.forEach(fa => {
+            console.warn(`⚠️ [MobileWebView] Failed action: ${fa.type} - ${fa.error}`)
+          })
+        } else {
+          console.log(`📱 [MobileWebView] Successfully executed all ${actions.length} actions`)
         }
-
-        console.log(`📱 [MobileWebView] Successfully executed all ${actions.length} actions`)
       } catch (error) {
-        console.error('📱 [MobileWebView] Action execution failed:', error)
-        throw error
+        // Log error but don't throw - allow simulation to continue
+        console.warn('⚠️ [MobileWebView] Action execution error (continuing):', error)
       }
     }, [device, connectionStatus])
 
@@ -283,6 +286,20 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
     const refresh = useCallback(async () => {
       await navigate(currentUrl)
     }, [navigate, currentUrl])
+
+    /**
+     * Refresh SDK network detection
+     * Forces server to re-detect network interfaces and republish Bonjour service
+     */
+    const refreshSDKNetwork = useCallback(async () => {
+      console.log('🔄 [MobileWebView] Refreshing SDK network detection...')
+      try {
+        await (window as any).electronAPI.refreshSDKNetwork()
+        console.log('✅ [MobileWebView] Network refresh requested')
+      } catch (error) {
+        console.error('❌ [MobileWebView] Failed to refresh network:', error)
+      }
+    }, [])
 
     /**
      * Start selector capture mode
@@ -479,12 +496,76 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
       })
 
       // Listen for SDK events
-      window.electronAPI.onSDKEvent((data) => {
+      window.electronAPI.onSDKEvent(async (data) => {
         console.log('📱 [SDK] Event received:', data.event)
 
         // Forward SDK events to recording store if recording
         if (recordingMode) {
-          addSDKEvent(data.event)
+          let enrichedEvent = { ...data.event }
+
+          // DEBUG: Log element object structure
+          console.log('🔍 [DEBUG] Element object:', enrichedEvent.element)
+          console.log('🔍 [DEBUG] Element keys:', enrichedEvent.element ? Object.keys(enrichedEvent.element) : 'null')
+          console.log('🔍 [DEBUG] viewHierarchyDebugDescription exists?', !!enrichedEvent.element?.viewHierarchyDebugDescription)
+          console.log('🔍 [DEBUG] viewHierarchyDebugDescription length:', enrichedEvent.element?.viewHierarchyDebugDescription?.length)
+
+          // INSTANT ELEMENT LOOKUP using iOS debugDescription API (NO WDA!)
+          if (enrichedEvent.element?.viewHierarchyDebugDescription && enrichedEvent.coordinates) {
+            const { x, y } = enrichedEvent.coordinates
+            const debugDesc = enrichedEvent.element.viewHierarchyDebugDescription
+
+            console.log(`🚀 [iOS Parser] Using debugDescription for instant lookup (${debugDesc.length} chars)`)
+
+            try {
+              const result = await window.electronAPI.invoke('mobile:parse-debug-description', {
+                debugDescription: debugDesc,
+                x,
+                y
+              })
+
+              if (result.success && result.accessibilityId) {
+                console.log(`✅ [iOS Parser] Found accessibility ID: ${result.accessibilityId} in ${result.elapsed}ms`)
+
+                enrichedEvent.element.accessibilityIdentifier = result.accessibilityId
+                enrichedEvent.element.iosDebugEnriched = true
+              } else {
+                console.log(`⚠️  [iOS Parser] No accessibility ID found at (${x}, ${y})`)
+              }
+            } catch (error: any) {
+              console.error('❌ [iOS Parser] Error:', error.message)
+            }
+          } else if (enrichedEvent.coordinates) {
+            // FALLBACK: iOS debugDescription not available, use WDA
+            console.log('⚠️  [Fallback] iOS debugDescription not available, falling back to WDA')
+
+            const connection = appiumConnectionManager.getConnection(device.id)
+            if (connection?.session) {
+              const sessionId = connection.session.sessionId
+              const { x, y } = enrichedEvent.coordinates
+
+              try {
+                const result = await window.electronAPI.invoke('mobile:wda-find-element-at-coordinates', {
+                  sessionId,
+                  x,
+                  y
+                })
+
+                if (result.success && result.elementInfo?.accessibilityId) {
+                  console.log(`✅ [WDA Fallback] Found accessibility ID: ${result.elementInfo.accessibilityId}`)
+
+                  if (!enrichedEvent.element) {
+                    enrichedEvent.element = {}
+                  }
+                  enrichedEvent.element.accessibilityIdentifier = result.elementInfo.accessibilityId
+                  enrichedEvent.element.wdaEnriched = true
+                }
+              } catch (error: any) {
+                console.error('❌ [WDA Fallback] Error:', error.message)
+              }
+            }
+          }
+
+          addSDKEvent(enrichedEvent)
         }
       })
 
@@ -753,12 +834,26 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
           </div>
 
           {/* SDK Connection Status */}
-          {sdkConnected && sdkDevice && (
-            <div className="flex items-center gap-2 px-3 py-1 bg-purple-600 rounded-full">
-              <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-              <span className="text-xs text-white font-medium">SDK Connected</span>
-              <div className="text-xs text-purple-200">{sdkDevice.deviceName || 'iOS Device'}</div>
-            </div>
+          {device?.os === 'ios' && (
+            <>
+              {sdkConnected && sdkDevice ? (
+                <div className="flex items-center gap-2 px-3 py-1 bg-purple-600 rounded-full">
+                  <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                  <span className="text-xs text-white font-medium">SDK Connected</span>
+                  <div className="text-xs text-purple-200">{sdkDevice.deviceName || 'iOS Device'}</div>
+                </div>
+              ) : (
+                <button
+                  onClick={refreshSDKNetwork}
+                  className="flex items-center gap-2 px-3 py-1 bg-red-600 hover:bg-red-700 rounded-full cursor-pointer transition-colors"
+                  title="Click to refresh network detection"
+                >
+                  <div className="w-2 h-2 bg-white rounded-full"></div>
+                  <span className="text-xs text-white font-medium">SDK Not Connected</span>
+                  <div className="text-xs text-red-200">click to refresh</div>
+                </button>
+              )}
+            </>
           )}
 
           {/* Selector Capture Toggle */}

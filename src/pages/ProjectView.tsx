@@ -5,6 +5,7 @@ import { useStepStore } from '../store/stepStore'
 import { useMobileDeviceStore } from '../store/mobileDeviceStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { useRecordingStore } from '../store/recordingStore'
+import { useAppConfigStore } from '../store/appConfigStore'
 import WebView from '../components/WebView'
 import MobileWebView from '../components/MobileWebView'
 import StepPanel from '../components/StepPanel'
@@ -32,10 +33,11 @@ interface ToastState {
 }
 
 function ProjectView() {
-  const { projects, currentProjectId, openProjectTabs, setCurrentProject, closeProjectTab, navigateTo, username, logout } = useProjectStore()
+  const { projects, currentProjectId, openProjectTabs, setCurrentProject, closeProjectTab, navigateTo, username, logout, updateProject } = useProjectStore()
   const { currentMode, getCurrentDevice } = useMobileDeviceStore()
   const { advancedMode, setAdvancedMode } = useSettingsStore()
   const recordingStore = useRecordingStore()
+  const { setTargetApp } = useAppConfigStore()
   const [sidebarTab, setSidebarTab] = useState<string>('flow')
   const [toast, setToast] = useState<ToastState>({ message: '', type: 'info', show: false })
   const [showDeviceDialog, setShowDeviceDialog] = useState(false)
@@ -330,6 +332,30 @@ function ProjectView() {
     }
   }, []) // Empty deps - only run on mount/unmount
 
+  // Sync project's mobile app bundle ID with appConfigStore
+  useEffect(() => {
+    if (currentProject && currentMode === 'mobile') {
+      const device = getCurrentDevice()
+
+      // Determine which bundle ID to use based on device OS
+      let bundleId: string | null = null
+      let appName: string | null = null
+
+      if (device?.os === 'ios' && currentProject.mobileApps?.ios?.bundleId) {
+        bundleId = currentProject.mobileApps.ios.bundleId
+        appName = currentProject.mobileApps.ios.appName
+      } else if (device?.os === 'android' && currentProject.mobileApps?.android?.packageName) {
+        bundleId = currentProject.mobileApps.android.packageName
+        appName = currentProject.mobileApps.android.appName
+      }
+
+      if (bundleId) {
+        console.log(`📱 [ProjectView] Syncing bundle ID from project: ${bundleId}`)
+        setTargetApp(bundleId, appName)
+      }
+    }
+  }, [currentProject, currentMode, getCurrentDevice, setTargetApp])
+
   const renderMainContent = () => {
     switch (sidebarTab) {
       case 'flow':
@@ -575,6 +601,99 @@ function ProjectView() {
                         </label>
                         <p className="text-xs text-gray-500 mt-1">
                           Show advanced features like Auto Flow, AI Explore, and additional settings
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Platform Configuration Card */}
+              <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">Platform Configuration</h3>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Configure platform URLs for this project
+                    </p>
+
+                    <div className="space-y-4">
+                      {/* Web URL */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Web URL
+                        </label>
+                        <input
+                          type="text"
+                          value={currentProject?.webUrl || currentProject?.url || ''}
+                          onChange={(e) => {
+                            if (currentProjectId) {
+                              updateProject(currentProjectId, { webUrl: e.target.value })
+                            }
+                          }}
+                          placeholder="e.g., https://example.com"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                        />
+                        <p className="mt-1 text-xs text-gray-500">
+                          Default URL for web testing and recording
+                        </p>
+                      </div>
+
+                      {/* iOS Bundle ID */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          iOS Bundle ID
+                        </label>
+                        <input
+                          type="text"
+                          value={currentProject?.mobileApps?.ios?.bundleId || ''}
+                          onChange={(e) => {
+                            if (currentProjectId) {
+                              updateProject(currentProjectId, {
+                                mobileApps: {
+                                  ...currentProject?.mobileApps,
+                                  ios: {
+                                    bundleId: e.target.value,
+                                    appName: currentProject?.mobileApps?.ios?.appName || ''
+                                  }
+                                }
+                              })
+                            }
+                          }}
+                          placeholder="e.g., com.rinasmusthafa.DigitalBooking"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                        />
+                        <p className="mt-1 text-xs text-gray-500">
+                          Bundle ID for iOS app testing
+                        </p>
+                      </div>
+
+                      {/* Android Package Name */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Android Package Name
+                        </label>
+                        <input
+                          type="text"
+                          value={currentProject?.mobileApps?.android?.packageName || ''}
+                          onChange={(e) => {
+                            if (currentProjectId) {
+                              updateProject(currentProjectId, {
+                                mobileApps: {
+                                  ...currentProject?.mobileApps,
+                                  android: {
+                                    packageName: e.target.value,
+                                    appName: currentProject?.mobileApps?.android?.appName || ''
+                                  }
+                                }
+                              })
+                            }
+                          }}
+                          placeholder="e.g., com.example.myapp"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                        />
+                        <p className="mt-1 text-xs text-gray-500">
+                          Package name for Android app testing
                         </p>
                       </div>
                     </div>

@@ -14,7 +14,15 @@ interface SettingsDialogProps {
 }
 
 export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
-  const { advancedMode, toggleAdvancedMode, resetSettings } = useSettingsStore()
+  const {
+    advancedMode,
+    toggleAdvancedMode,
+    mobileAppUrl,
+    webUrl,
+    setMobileAppUrl,
+    setWebUrl,
+    resetSettings
+  } = useSettingsStore()
 
   if (!isOpen) return null
 
@@ -96,6 +104,47 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                   </ul>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Platform Configuration Section */}
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 mb-4">Platform Configuration</h3>
+
+            <div className="bg-gray-50 rounded-lg p-4 space-y-4">
+              {/* Mobile App URL */}
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-2">
+                  Mobile App URL
+                </label>
+                <input
+                  type="text"
+                  value={mobileAppUrl}
+                  onChange={(e) => setMobileAppUrl(e.target.value)}
+                  placeholder="e.g., com.rinasmusthafa.DigitalBooking"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                <p className="mt-1 text-xs text-gray-600">
+                  Bundle ID or package name for mobile app testing
+                </p>
+              </div>
+
+              {/* Web URL */}
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-2">
+                  Web URL
+                </label>
+                <input
+                  type="text"
+                  value={webUrl}
+                  onChange={(e) => setWebUrl(e.target.value)}
+                  placeholder="e.g., https://example.com"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                <p className="mt-1 text-xs text-gray-600">
+                  Default URL for web testing and recording
+                </p>
+              </div>
             </div>
           </div>
 
