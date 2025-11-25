@@ -54,6 +54,12 @@ export const IPC_CHANNELS = {
   // Parse iOS debugDescription (INSTANT - uses iOS native API!)
   PARSE_DEBUG_DESCRIPTION: 'mobile:parse-debug-description',
 
+  // Network Monitoring
+  NETWORK_START_MONITORING: 'mobile:network-start-monitoring',
+  NETWORK_STOP_MONITORING: 'mobile:network-stop-monitoring',
+  NETWORK_CLEAR: 'mobile:network-clear',
+  NETWORK_EXPORT_HAR: 'mobile:network-export-har',
+
   // Connection Status
   CONNECTION_STATUS: 'mobile:connection-status',
   CONNECTION_ERROR: 'mobile:connection-error'
@@ -462,6 +468,101 @@ export function setupMobileDeviceIPC(ipcMain: any) {
       const elapsed = Date.now() - startTime
       console.error('❌ [iOS Parser] Parse debugDescription error:', error)
       return { success: false, error: error.message, elapsed }
+    }
+  })
+
+  // Network monitoring handlers
+  ipcMain.handle(IPC_CHANNELS.NETWORK_START_MONITORING, async (_event: any, { deviceId }: { deviceId: string }) => {
+    console.log(`🌐 [IPC] Starting network monitoring for device: ${deviceId}`)
+    try {
+      const { getWebSocketServer } = require('./websocketServer')
+      const wsServer = getWebSocketServer()
+
+      // Send startNetworkMonitoring command to SDK
+      const success = wsServer.sendToDevice(deviceId, {
+        type: 'startNetworkMonitoring',
+        timestamp: Date.now()
+      })
+
+      if (success) {
+        console.log(`✅ [IPC] Network monitoring command sent to device: ${deviceId}`)
+        return { success: true }
+      } else {
+        console.error(`❌ [IPC] Failed to send network monitoring command - device not found: ${deviceId}`)
+        return { success: false, error: 'Device not found' }
+      }
+    } catch (error: any) {
+      console.error('❌ [IPC] Start network monitoring error:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.NETWORK_STOP_MONITORING, async (_event: any, { deviceId }: { deviceId: string }) => {
+    console.log(`🌐 [IPC] Stopping network monitoring for device: ${deviceId}`)
+    try {
+      const { getWebSocketServer } = require('./websocketServer')
+      const wsServer = getWebSocketServer()
+
+      // Send stopNetworkMonitoring command to SDK
+      const success = wsServer.sendToDevice(deviceId, {
+        type: 'stopNetworkMonitoring',
+        timestamp: Date.now()
+      })
+
+      if (success) {
+        console.log(`✅ [IPC] Network monitoring stop command sent to device: ${deviceId}`)
+        return { success: true }
+      } else {
+        console.error(`❌ [IPC] Failed to send stop command - device not found: ${deviceId}`)
+        return { success: false, error: 'Device not found' }
+      }
+    } catch (error: any) {
+      console.error('❌ [IPC] Stop network monitoring error:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.NETWORK_CLEAR, async () => {
+    console.log(`🌐 [IPC] Clearing network entries`)
+    try {
+      // Network entries are stored in renderer process (networkStore)
+      // This handler is just for consistency - actual clearing happens in renderer
+      return { success: true }
+    } catch (error: any) {
+      console.error('❌ [IPC] Clear network error:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.NETWORK_EXPORT_HAR, async (_event: any, { harData, filename }: { harData: any, filename: string }) => {
+    console.log(`🌐 [IPC] Exporting network log as HAR: ${filename}`)
+    try {
+      const { dialog } = require('electron')
+      const fs = require('fs')
+
+      // Show save dialog
+      const result = await dialog.showSaveDialog({
+        title: 'Export Network Log (HAR)',
+        defaultPath: filename || 'network-log.har',
+        filters: [
+          { name: 'HAR Files', extensions: ['har'] },
+          { name: 'JSON Files', extensions: ['json'] },
+          { name: 'All Files', extensions: ['*'] }
+        ]
+      })
+
+      if (result.canceled || !result.filePath) {
+        return { success: false, error: 'User canceled' }
+      }
+
+      // Write HAR data to file
+      fs.writeFileSync(result.filePath, JSON.stringify(harData, null, 2), 'utf-8')
+
+      console.log(`✅ [IPC] Network log exported to: ${result.filePath}`)
+      return { success: true, filePath: result.filePath }
+    } catch (error: any) {
+      console.error('❌ [IPC] Export HAR error:', error)
+      return { success: false, error: error.message }
     }
   })
 

@@ -95,7 +95,7 @@ interface TouchEvent extends SDKEvent {
 }
 
 interface SDKCommand {
-  type: 'startRecording' | 'stopRecording' | 'ping' | 'executeAction'
+  type: 'startRecording' | 'stopRecording' | 'ping' | 'executeAction' | 'startNetworkMonitoring' | 'stopNetworkMonitoring'
   timestamp: number
   payload?: {
     actionId?: string
@@ -117,6 +117,27 @@ interface ExecutionLogEvent extends SDKEvent {
     centerPoint?: { x: number; y: number }
     tapStrategy?: string
   }
+}
+
+interface NetworkEvent extends SDKEvent {
+  type: 'network'
+  requestId: string
+  method: string
+  url: string
+  requestHeaders: Record<string, string>
+  requestBody?: string // Base64 encoded
+  requestBodySize: number
+  responseStatus?: number
+  responseHeaders: Record<string, string>
+  responseBody?: string // Base64 encoded
+  responseBodySize: number
+  responseMimeType?: string
+  startTime: number // Unix timestamp in milliseconds
+  endTime?: number // Unix timestamp in milliseconds
+  totalDuration: number // milliseconds
+  waitTime: number // Time waiting for first byte (milliseconds)
+  downloadTime: number // Time downloading response (milliseconds)
+  error?: string
 }
 
 /**
@@ -190,9 +211,9 @@ export class SnapTestWebSocketServer {
   }
 
   /**
-   * Send command to SDK (start/stop recording)
+   * Send command to SDK (start/stop recording, network monitoring)
    */
-  sendCommand(deviceId: string, commandType: 'startRecording' | 'stopRecording') {
+  sendCommand(deviceId: string, commandType: 'startRecording' | 'stopRecording' | 'startNetworkMonitoring' | 'stopNetworkMonitoring') {
     console.log(`📤 [WebSocket Server] Sending command: ${commandType} to device ${deviceId}`)
 
     const command: SDKCommand = {
@@ -204,11 +225,13 @@ export class SnapTestWebSocketServer {
     for (const [ws, deviceInfo] of this.connectedClients.entries()) {
       if (deviceInfo.bundleId === deviceId || deviceInfo.deviceName === deviceId) {
         this.sendJSON(ws, command)
+        console.log(`✅ [WebSocket Server] Command sent: ${commandType}`)
         return true
       }
     }
 
     console.warn(`⚠️ [WebSocket Server] Device not found: ${deviceId}`)
+    console.warn(`⚠️ [WebSocket Server] Connected devices:`, Array.from(this.connectedClients.values()).map(d => `${d.deviceName} (${d.bundleId})`))
     return false
   }
 
@@ -409,6 +432,10 @@ export class SnapTestWebSocketServer {
 
       case 'viewHierarchyResponse':
         this.handleViewHierarchyResponse(ws, message)
+        break
+
+      case 'network':
+        this.handleNetworkEvent(ws, message as NetworkEvent)
         break
 
       default:
@@ -613,6 +640,35 @@ export class SnapTestWebSocketServer {
         hierarchy: message.hierarchy,
         error: message.error
       }
+    })
+  }
+
+  private handleNetworkEvent(ws: WebSocket, networkEvent: NetworkEvent) {
+    const deviceInfo = this.connectedClients.get(ws)
+
+    if (!deviceInfo) {
+      console.warn('⚠️ [WebSocket Server] Network event from unknown device')
+      return
+    }
+
+    // Log network request/response
+    if (networkEvent.endTime) {
+      // Complete request
+      const statusEmoji = networkEvent.error ? '❌' : networkEvent.responseStatus && networkEvent.responseStatus >= 400 ? '⚠️' : '✅'
+      console.log(`🌐 [WebSocket Server] ${statusEmoji} ${networkEvent.method} ${networkEvent.url} - ${networkEvent.responseStatus || 'ERROR'} (${networkEvent.totalDuration}ms)`)
+      if (networkEvent.error) {
+        console.log(`   └─ Error: ${networkEvent.error}`)
+      }
+    } else {
+      // Request started
+      console.log(`🌐 [WebSocket Server] ⏱️ ${networkEvent.method} ${networkEvent.url} - Started`)
+    }
+
+    // Forward to renderer for Network Panel
+    this.notifyRenderer('sdk-network-event', {
+      deviceId: deviceInfo.bundleId,
+      device: deviceInfo,
+      event: networkEvent
     })
   }
 

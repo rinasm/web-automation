@@ -32,11 +32,17 @@ public class SnapTest {
     /// Bonjour service discovery
     private var bonjourDiscovery: BonjourServiceDiscovery?
 
+    /// Network interceptor for capturing HTTP traffic
+    private var networkInterceptor: NetworkInterceptor?
+
     /// Current connection status
     public private(set) var isConnected: Bool = false
 
     /// Current recording status
     public private(set) var isRecording: Bool = false
+
+    /// Network monitoring status
+    public private(set) var isMonitoringNetwork: Bool = false
 
     private init() {}
 
@@ -64,6 +70,10 @@ public class SnapTest {
         // Initialize touch event capture
         touchEventCapture = TouchEventCapture()
         touchEventCapture?.delegate = self
+
+        // Initialize network interceptor
+        networkInterceptor = NetworkInterceptor.shared
+        networkInterceptor?.delegate = self
 
         // Start Bonjour discovery
         bonjourDiscovery = BonjourServiceDiscovery()
@@ -106,6 +116,10 @@ public class SnapTest {
         touchEventCapture = TouchEventCapture()
         touchEventCapture?.delegate = self
 
+        // Initialize network interceptor
+        networkInterceptor = NetworkInterceptor.shared
+        networkInterceptor?.delegate = self
+
         print("🔵 [SnapTest SDK] Initialized with manual connection")
     }
 
@@ -114,11 +128,13 @@ public class SnapTest {
         print("🔵 [SnapTest SDK] Stopping...")
 
         touchEventCapture?.stopCapturing()
+        networkInterceptor?.stopMonitoring()
         webSocketManager?.disconnect()
         bonjourDiscovery?.stopDiscovery()
 
         isConnected = false
         isRecording = false
+        isMonitoringNetwork = false
 
         print("🔵 [SnapTest SDK] Stopped")
     }
@@ -155,6 +171,25 @@ public class SnapTest {
         )
         webSocketManager?.send(event: logEvent)
     }
+
+    /// Start monitoring network requests (HTTP/HTTPS traffic)
+    public func startNetworkMonitoring() {
+        guard isConnected else {
+            print("⚠️ [SnapTest SDK] Cannot start network monitoring: not connected to desktop app")
+            return
+        }
+
+        print("🌐 [SnapTest SDK] Network monitoring started")
+        isMonitoringNetwork = true
+        networkInterceptor?.startMonitoring()
+    }
+
+    /// Stop monitoring network requests
+    public func stopNetworkMonitoring() {
+        print("🌐 [SnapTest SDK] Network monitoring stopped")
+        isMonitoringNetwork = false
+        networkInterceptor?.stopMonitoring()
+    }
 }
 
 // MARK: - WebSocketManagerDelegate
@@ -172,12 +207,24 @@ extension SnapTest: WebSocketManagerDelegate {
             bundleId: Bundle.main.bundleIdentifier ?? "unknown"
         )
         webSocketManager?.send(event: handshake)
+
+        // Automatically start network monitoring when connected
+        print("🌐 [SnapTest SDK] Auto-starting network monitoring...")
+        isMonitoringNetwork = true
+        networkInterceptor?.startMonitoring()
     }
 
     func webSocketDidDisconnect(error: Error?) {
         print("🔴 [SnapTest SDK] Disconnected from desktop app")
         isConnected = false
         isRecording = false
+
+        // Stop network monitoring when disconnected
+        if isMonitoringNetwork {
+            print("🌐 [SnapTest SDK] Auto-stopping network monitoring due to disconnect...")
+            isMonitoringNetwork = false
+            networkInterceptor?.stopMonitoring()
+        }
 
         if let error = error {
             print("❌ [SnapTest SDK] Disconnection error: \(error.localizedDescription)")
@@ -205,6 +252,10 @@ extension SnapTest: WebSocketManagerDelegate {
             handleExecuteAction(command)
         case .getViewHierarchy:
             handleGetViewHierarchy()
+        case .startNetworkMonitoring:
+            startNetworkMonitoring()
+        case .stopNetworkMonitoring:
+            stopNetworkMonitoring()
         }
     }
 
@@ -400,5 +451,28 @@ extension SnapTest: BonjourServiceDiscoveryDelegate {
             print("🔄 [SnapTest SDK] Retrying discovery...")
             self?.bonjourDiscovery?.startDiscovery()
         }
+    }
+}
+
+// MARK: - NetworkInterceptorDelegate
+
+extension SnapTest: NetworkInterceptorDelegate {
+    public func didCaptureNetworkRequest(_ event: NetworkEvent) {
+        guard isMonitoringNetwork else { return }
+
+        print("🌐 [SnapTest SDK] Captured network request: \(event.method) \(event.url)")
+        webSocketManager?.send(event: event)
+    }
+
+    public func didCompleteNetworkRequest(_ event: NetworkEvent) {
+        guard isMonitoringNetwork else { return }
+
+        if let error = event.error {
+            print("❌ [SnapTest SDK] Network request failed: \(error)")
+        } else {
+            print("✅ [SnapTest SDK] Network request completed: \(event.method) \(event.url) - Status: \(event.responseStatus ?? 0)")
+        }
+
+        webSocketManager?.send(event: event)
     }
 }

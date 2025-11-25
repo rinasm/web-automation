@@ -8,6 +8,7 @@
 
 import { Feature, PlatformType, MobileAppsConfig } from '../types/feature'
 import { Action } from '../store/stepStore'
+import { claudeService } from './claudeService'
 
 export interface CodeGenerationOptions {
   projectName: string
@@ -39,6 +40,66 @@ class CodeGenerationService {
   }
 
   /**
+   * Regenerate code using AI to improve quality and best practices
+   */
+  async regenerateCodeWithAI(currentCode: GeneratedCode): Promise<GeneratedCode> {
+    if (!claudeService.isInitialized()) {
+      throw new Error('Claude AI is not initialized. Please configure your API key in settings.')
+    }
+
+    const framework = currentCode.framework === 'playwright' ? 'Playwright' : 'WebdriverIO'
+    const language = 'TypeScript'
+
+    const systemPrompt = `You are a senior software engineer specializing in test automation. Your task is to improve and refine test automation code following industry best practices.
+
+Key principles:
+- Write clean, maintainable, and professional code
+- Follow the official ${framework} best practices
+- Use proper TypeScript types and async/await patterns
+- Add meaningful comments only where necessary
+- Optimize selectors and waits
+- Ensure proper error handling
+- Follow DRY (Don't Repeat Yourself) principles
+- Use Page Object Model patterns where applicable
+- Add proper test organization and structure`
+
+    const userPrompt = `Please improve and refine this ${framework} test code. Maintain the same test scenarios and structure, but enhance:
+
+1. Code quality and readability
+2. Best practices for ${framework}
+3. Selector strategies (prefer data-testid, id, or role-based selectors)
+4. Proper waiting strategies
+5. Better error messages and assertions
+6. TypeScript best practices
+
+Current code:
+\`\`\`typescript
+${currentCode.code}
+\`\`\`
+
+Please return ONLY the improved code without any explanations or markdown code blocks.`
+
+    try {
+      const improvedCode = await claudeService.askClaude(userPrompt, systemPrompt)
+
+      // Clean up markdown code blocks if present
+      let cleanedCode = improvedCode.trim()
+
+      // Remove markdown code block syntax (```typescript, ```ts, or just ```)
+      cleanedCode = cleanedCode.replace(/^```(?:typescript|ts)?\n?/i, '')
+      cleanedCode = cleanedCode.replace(/\n?```$/, '')
+
+      return {
+        ...currentCode,
+        code: cleanedCode.trim()
+      }
+    } catch (error: any) {
+      console.error('AI code regeneration failed:', error)
+      throw new Error(`Failed to regenerate code: ${error.message}`)
+    }
+  }
+
+  /**
    * Generate Playwright code for web platform
    */
   private generatePlaywrightCode(
@@ -49,30 +110,40 @@ class CodeGenerationService {
     const { projectName, webUrl } = options
 
     let code = `import { test, expect } from '@playwright/test';\n\n`
+
+    // Feature documentation
     code += `/**\n`
     code += ` * Feature: ${feature.name}\n`
     if (feature.descriptionWeb) {
-      code += ` * ${feature.descriptionWeb}\n`
+      code += ` * Description: ${feature.descriptionWeb}\n`
+    }
+    if (webUrl) {
+      code += ` * Base URL: ${webUrl}\n`
     }
     code += ` */\n\n`
 
+    // Test suite
+    code += `test.describe('${this.sanitizeTestName(feature.name)}', () => {\n`
+
     // Generate test for each step
-    steps.forEach((step, index) => {
-      code += `test('${this.sanitizeTestName(step.name)}', async ({ page }) => {\n`
+    steps.forEach((step, stepIndex) => {
+      code += `\n  test('${this.sanitizeTestName(step.name)}', async ({ page }) => {\n`
 
       // Navigate to URL if this is the first step
-      if (index === 0 && webUrl) {
-        code += `  // Navigate to application\n`
-        code += `  await page.goto('${webUrl}');\n\n`
+      if (stepIndex === 0 && webUrl) {
+        code += `    // Navigate to application\n`
+        code += `    await page.goto('${webUrl}');\n\n`
       }
 
       // Generate actions
       step.actions.forEach((action, actionIndex) => {
-        code += this.generatePlaywrightAction(action, actionIndex + 1)
+        code += this.generatePlaywrightAction(action, actionIndex + 1, stepIndex + 1)
       })
 
-      code += `});\n\n`
+      code += `  });\n`
     })
+
+    code += `});\n`
 
     const fileName = this.generateFileName(projectName, feature.name, 'spec.ts')
 
@@ -95,33 +166,38 @@ class CodeGenerationService {
     const { projectName, mobileApps } = options
 
     let code = `import { expect } from '@wdio/globals';\n\n`
+
+    // Feature documentation
     code += `/**\n`
     code += ` * Feature: ${feature.name}\n`
     if (feature.descriptionMobile) {
-      code += ` * ${feature.descriptionMobile}\n`
+      code += ` * Description: ${feature.descriptionMobile}\n`
     }
     code += ` *\n`
     if (mobileApps?.ios) {
-      code += ` * iOS: ${mobileApps.ios.bundleId}\n`
+      code += ` * iOS Bundle: ${mobileApps.ios.bundleId}\n`
     }
     if (mobileApps?.android) {
-      code += ` * Android: ${mobileApps.android.packageName}\n`
+      code += ` * Android Package: ${mobileApps.android.packageName}\n`
     }
     code += ` */\n\n`
 
+    // Single describe block for the feature
+    code += `describe('${this.sanitizeTestName(feature.name)}', () => {\n`
+
     // Generate test for each step
-    steps.forEach((step) => {
-      code += `describe('${this.sanitizeTestName(feature.name)}', () => {\n`
-      code += `  it('${this.sanitizeTestName(step.name)}', async () => {\n`
+    steps.forEach((step, stepIndex) => {
+      code += `\n  it('${this.sanitizeTestName(step.name)}', async () => {\n`
 
       // Generate actions
       step.actions.forEach((action, actionIndex) => {
-        code += this.generateWebDriverIOAction(action, actionIndex + 1)
+        code += this.generateWebDriverIOAction(action, actionIndex + 1, stepIndex + 1)
       })
 
       code += `  });\n`
-      code += `});\n\n`
     })
+
+    code += `});\n`
 
     const fileName = this.generateFileName(projectName, feature.name, 'test.ts')
 
@@ -136,49 +212,64 @@ class CodeGenerationService {
   /**
    * Generate Playwright action code
    */
-  private generatePlaywrightAction(action: Action, actionNumber: number): string {
-    let code = `  // Action ${actionNumber}: ${this.getActionDescription(action)}\n`
+  private generatePlaywrightAction(action: Action, actionNumber: number, stepNumber: number): string {
+    let code = ''
 
     switch (action.type) {
       case 'click':
         if (!action.selector) {
-          code += `  // TODO: Add selector for click action\n\n`
+          code += `    // TODO: Add selector for click action\n`
         } else {
-          code += `  await page.locator('${this.escapeSelector(action.selector)}').click();\n\n`
+          code += `    await page.locator('${this.escapeSelector(action.selector)}').click();\n`
         }
         break
 
       case 'type':
         if (!action.selector || !action.value) {
-          code += `  // TODO: Add selector and text for type action\n\n`
+          code += `    // TODO: Add selector and text for type action\n`
         } else {
-          code += `  await page.locator('${this.escapeSelector(action.selector)}').fill('${this.escapeString(action.value)}');\n\n`
+          code += `    await page.locator('${this.escapeSelector(action.selector)}').fill('${this.escapeString(action.value)}');\n`
         }
         break
 
       case 'hover':
         if (!action.selector) {
-          code += `  // TODO: Add selector for hover action\n\n`
+          code += `    // TODO: Add selector for hover action\n`
         } else {
-          code += `  await page.locator('${this.escapeSelector(action.selector)}').hover();\n\n`
+          code += `    await page.locator('${this.escapeSelector(action.selector)}').hover();\n`
         }
         break
 
       case 'wait':
         const waitTime = parseInt(action.value || '1000')
-        code += `  await page.waitForTimeout(${waitTime});\n\n`
+        code += `    await page.waitForTimeout(${waitTime});\n`
         break
 
       case 'assert':
         if (!action.selector) {
-          code += `  // TODO: Add selector for assertion\n\n`
+          code += `    // TODO: Add selector for assertion\n`
         } else {
-          code += `  await expect(page.locator('${this.escapeSelector(action.selector)}')).toBeVisible();\n\n`
+          code += `    await expect(page.locator('${this.escapeSelector(action.selector)}')).toBeVisible();\n`
         }
         break
 
+      case 'scroll':
+        const scrollAmount = action.value || '300'
+        code += `    await page.evaluate(() => window.scrollBy(0, ${scrollAmount}));\n`
+        break
+
+      case 'navigate':
+        if (action.value) {
+          code += `    await page.goto('${action.value}');\n`
+        }
+        break
+
+      case 'screenshot':
+        code += `    await page.screenshot({ path: 'screenshot-step-${stepNumber}-${actionNumber}.png' });\n`
+        break
+
       default:
-        code += `  // TODO: Implement ${action.type} action\n\n`
+        code += `    // TODO: Implement ${action.type} action\n`
     }
 
     return code
@@ -187,61 +278,60 @@ class CodeGenerationService {
   /**
    * Generate WebDriverIO action code
    */
-  private generateWebDriverIOAction(action: Action, actionNumber: number): string {
-    let code = `    // Action ${actionNumber}: ${this.getActionDescription(action)}\n`
+  private generateWebDriverIOAction(action: Action, actionNumber: number, stepNumber: number): string {
+    const elementName = `element${stepNumber}_${actionNumber}`
+    let code = ''
 
     switch (action.type) {
       case 'click':
         if (!action.selector) {
-          code += `    // TODO: Add selector for tap action\n\n`
+          code += `    // TODO: Add selector for tap action\n`
         } else {
           const selector = this.convertToMobileSelector(action.selector)
-          code += `    const element${actionNumber} = await $('${this.escapeSelector(selector)}');\n`
-          code += `    await element${actionNumber}.waitForDisplayed();\n`
-          code += `    await element${actionNumber}.click();\n\n`
+          code += `    const ${elementName} = await $('${this.escapeSelector(selector)}');\n`
+          code += `    await ${elementName}.waitForDisplayed({ timeout: 5000 });\n`
+          code += `    await ${elementName}.click();\n`
         }
         break
 
       case 'type':
         if (!action.selector || !action.value) {
-          code += `    // TODO: Add selector and text for type action\n\n`
+          code += `    // TODO: Add selector and text for type action\n`
         } else {
           const selector = this.convertToMobileSelector(action.selector)
-          code += `    const element${actionNumber} = await $('${this.escapeSelector(selector)}');\n`
-          code += `    await element${actionNumber}.waitForDisplayed();\n`
-          code += `    await element${actionNumber}.setValue('${this.escapeString(action.value)}');\n\n`
+          code += `    const ${elementName} = await $('${this.escapeSelector(selector)}');\n`
+          code += `    await ${elementName}.waitForDisplayed({ timeout: 5000 });\n`
+          code += `    await ${elementName}.setValue('${this.escapeString(action.value)}');\n`
         }
         break
 
       case 'wait':
         const waitTime = parseInt(action.value || '1000')
-        code += `    await driver.pause(${waitTime});\n\n`
+        code += `    await driver.pause(${waitTime});\n`
         break
 
       case 'assert':
         if (!action.selector) {
-          code += `    // TODO: Add selector for assertion\n\n`
+          code += `    // TODO: Add selector for assertion\n`
         } else {
           const selector = this.convertToMobileSelector(action.selector)
-          code += `    const element${actionNumber} = await $('${this.escapeSelector(selector)}');\n`
-          code += `    await expect(element${actionNumber}).toBeDisplayed();\n\n`
+          code += `    const ${elementName} = await $('${this.escapeSelector(selector)}');\n`
+          code += `    await expect(${elementName}).toBeDisplayed();\n`
         }
         break
 
       case 'scroll':
         const direction = action.value || 'down'
-        code += `    // Scroll ${direction}\n`
-        code += `    await driver.execute('mobile: scroll', { direction: '${direction}' });\n\n`
+        code += `    await driver.execute('mobile: scroll', { direction: '${direction}' });\n`
         break
 
       case 'swipe':
         const swipeDirection = action.value || 'up'
-        code += `    // Swipe ${swipeDirection}\n`
-        code += `    await driver.execute('mobile: swipe', { direction: '${swipeDirection}' });\n\n`
+        code += `    await driver.execute('mobile: swipe', { direction: '${swipeDirection}' });\n`
         break
 
       default:
-        code += `    // TODO: Implement ${action.type} action\n\n`
+        code += `    // TODO: Implement ${action.type} action\n`
     }
 
     return code

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session } from 'electron';
+import { app, BrowserWindow, ipcMain, session, clipboard } from 'electron';
 import * as path from 'path';
 import { setupMobileDeviceIPC } from './mobileDeviceIPC';
 import { setupSpeechRecognitionIPC } from './speechRecognition';
@@ -110,8 +110,19 @@ ipcMain.handle('generate-code', async (_event, flow) => {
   return generatePlaywrightCode(flow);
 });
 
+// Clipboard operations
+ipcMain.handle('clipboard:write', async (_event, text: string) => {
+  try {
+    clipboard.writeText(text);
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to write to clipboard:', error);
+    return { success: false, error: (error as Error).message };
+  }
+});
+
 // SDK WebSocket - Send command to connected SDK
-ipcMain.handle('sdk:send-command', async (_event, deviceId: string, commandType: 'startRecording' | 'stopRecording') => {
+ipcMain.handle('sdk:send-command', async (_event, deviceId: string, commandType: 'startRecording' | 'stopRecording' | 'startNetworkMonitoring' | 'stopNetworkMonitoring') => {
   console.log(`📤 [IPC] Sending SDK command: ${commandType} to device ${deviceId}`);
 
   const wsServer = getWebSocketServer();

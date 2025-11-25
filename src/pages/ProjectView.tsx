@@ -6,6 +6,7 @@ import { useMobileDeviceStore } from '../store/mobileDeviceStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { useRecordingStore } from '../store/recordingStore'
 import { useAppConfigStore } from '../store/appConfigStore'
+import { useNetworkStore } from '../store/networkStore'
 import WebView from '../components/WebView'
 import MobileWebView from '../components/MobileWebView'
 import StepPanel from '../components/StepPanel'
@@ -14,6 +15,8 @@ import { FeatureCreationDialog } from '../components/FeatureCreationDialog'
 import AutoFlowPanel from '../components/AutoFlowPanel'
 import AIExplorationPanel from '../components/AIExplorationPanel'
 import DeviceCapabilitiesPanel from '../components/DeviceCapabilitiesPanel'
+import MobileRecordingPanel from '../components/MobileRecordingPanel'
+import { NetworkPanel } from '../components/NetworkPanel'
 import Toast, { ToastType } from '../components/Toast'
 import Sidebar from '../components/Sidebar'
 import { ModeToggle } from '../components/ModeToggle'
@@ -38,6 +41,7 @@ function ProjectView() {
   const { advancedMode, setAdvancedMode } = useSettingsStore()
   const recordingStore = useRecordingStore()
   const { setTargetApp } = useAppConfigStore()
+  const { isPanelVisible, setPanelVisible } = useNetworkStore()
   const [sidebarTab, setSidebarTab] = useState<string>('flow')
   const [toast, setToast] = useState<ToastState>({ message: '', type: 'info', show: false })
   const [showDeviceDialog, setShowDeviceDialog] = useState(false)
@@ -443,6 +447,16 @@ function ProjectView() {
                     </p>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Network Panel (400px fixed, conditionally rendered) */}
+            {isPanelVisible && currentMode === 'mobile' && (
+              <div className="w-[400px] h-full bg-gray-900 border-l border-gray-700 flex flex-col shadow-lg">
+                <NetworkPanel
+                  isVisible={isPanelVisible}
+                  onClose={() => setPanelVisible(false)}
+                />
               </div>
             )}
 

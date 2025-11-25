@@ -6,6 +6,8 @@ export interface CodeGenOptions {
   isMobile?: boolean
 }
 
+export type FrameworkType = 'playwright' | 'webdriverio'
+
 export function generatePlaywrightCode(
   step: Step & { url: string },
   options: CodeGenOptions = {}
@@ -31,6 +33,41 @@ export function generatePlaywrightCode(
     code += generateActionCode(action, index + 1, isMobile)
   })
 
+  code += `});\n`
+
+  return code
+}
+
+export function generateWebDriverIOCode(
+  step: Step & { url: string },
+  options: CodeGenOptions = {}
+): string {
+  const { name, actions, url } = step
+  const { device, isMobile } = options
+
+  let code = `import { expect } from '@wdio/globals';\n\n`
+
+  if (isMobile && device) {
+    code += `/**\n`
+    code += ` * Mobile test for ${device.name} (${device.os === 'android' ? 'Android' : 'iOS'})\n`
+    code += ` * Platform: ${device.os}\n`
+    code += ` * Device: ${device.name}\n`
+    code += ` */\n\n`
+  }
+
+  code += `describe('${sanitizeTestName(name)}', () => {\n`
+  code += `  it('should execute test steps', async () => {\n`
+
+  if (!isMobile) {
+    code += `    // Navigate to the target URL\n`
+    code += `    await browser.url('${url}');\n\n`
+  }
+
+  actions.forEach((action, index) => {
+    code += generateWebDriverIOActionCode(action, index + 1, isMobile)
+  })
+
+  code += `  });\n`
   code += `});\n`
 
   return code
@@ -190,4 +227,127 @@ function sanitizeTestName(name: string): string {
 
 function escapeString(str: string): string {
   return str.replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r')
+}
+
+function generateWebDriverIOActionCode(action: Action, actionNumber: number, isMobile: boolean = false): string {
+  let code = `    // Action ${actionNumber}: ${getActionDescription(action)}\n`
+
+  switch (action.type) {
+    case 'click':
+      if (!action.selector) {
+        code += `    // TODO: Add selector for click action\n\n`
+      } else {
+        const selector = convertToMobileSelector(action.selector, isMobile)
+        code += `    const element${actionNumber} = await $('${selector}');\n`
+        code += `    await element${actionNumber}.waitForDisplayed();\n`
+        code += `    await element${actionNumber}.click();\n\n`
+      }
+      break
+
+    case 'type':
+      if (!action.selector || !action.value) {
+        code += `    // TODO: Add selector and text for type action\n\n`
+      } else {
+        const selector = convertToMobileSelector(action.selector, isMobile)
+        code += `    const element${actionNumber} = await $('${selector}');\n`
+        code += `    await element${actionNumber}.waitForDisplayed();\n`
+        code += `    await element${actionNumber}.setValue('${escapeString(action.value)}');\n\n`
+      }
+      break
+
+    case 'hover':
+      if (!action.selector) {
+        code += `    // TODO: Add selector for hover action\n\n`
+      } else {
+        if (isMobile) {
+          code += `    // Note: hover is not supported on mobile, using tap instead\n`
+          const selector = convertToMobileSelector(action.selector, isMobile)
+          code += `    const element${actionNumber} = await $('${selector}');\n`
+          code += `    await element${actionNumber}.click();\n\n`
+        } else {
+          code += `    const element${actionNumber} = await $('${action.selector}');\n`
+          code += `    await element${actionNumber}.moveTo();\n\n`
+        }
+      }
+      break
+
+    case 'wait':
+      const waitTime = parseInt(action.value || '1000')
+      code += `    await browser.pause(${waitTime});\n\n`
+      break
+
+    case 'assert':
+      if (!action.selector) {
+        code += `    // TODO: Add selector for assertion\n\n`
+      } else {
+        const selector = convertToMobileSelector(action.selector, isMobile)
+        code += `    const element${actionNumber} = await $('${selector}');\n`
+        code += `    await expect(element${actionNumber}).toBeDisplayed();\n\n`
+      }
+      break
+
+    case 'scroll':
+      if (isMobile) {
+        const direction = action.value || 'down'
+        code += `    // Mobile scroll: ${direction}\n`
+        code += `    await driver.execute('mobile: scroll', { direction: '${direction}' });\n\n`
+      } else {
+        const scrollAmount = action.value || '300'
+        code += `    await browser.execute((amount) => {\n`
+        code += `      window.scrollBy(0, amount);\n`
+        code += `    }, ${scrollAmount});\n\n`
+      }
+      break
+
+    case 'swipe':
+      if (isMobile) {
+        const direction = action.value || 'up'
+        code += `    // Mobile swipe: ${direction}\n`
+        code += `    await driver.execute('mobile: swipe', { direction: '${direction}' });\n\n`
+      } else {
+        code += `    // Swipe action not supported on web\n\n`
+      }
+      break
+
+    case 'navigate':
+      if (action.value) {
+        code += `    await browser.url('${action.value}');\n\n`
+      }
+      break
+
+    case 'screenshot':
+      code += `    await browser.saveScreenshot('screenshot-${actionNumber}.png');\n\n`
+      break
+
+    default:
+      code += `    // Unknown action type: ${action.type}\n\n`
+  }
+
+  return code
+}
+
+function convertToMobileSelector(selector: string, isMobile: boolean): string {
+  if (!isMobile) {
+    return selector
+  }
+
+  // If already a mobile selector (starts with ~), return as-is
+  if (selector.startsWith('~')) {
+    return selector
+  }
+
+  // If it's an ID selector (#id), convert to accessibility ID
+  if (selector.startsWith('#')) {
+    const id = selector.substring(1)
+    return `~${id}`
+  }
+
+  // If it's a data-testid attribute, convert to accessibility ID
+  const testIdMatch = selector.match(/\[data-testid=["']([^"']+)["']\]/)
+  if (testIdMatch) {
+    return `~${testIdMatch[1]}`
+  }
+
+  // Otherwise, keep as-is (might be XPath)
+  return selector
 }

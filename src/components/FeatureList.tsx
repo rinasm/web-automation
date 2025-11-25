@@ -57,6 +57,8 @@ export function FeatureList({
   // Code generation state
   const [showCodeModal, setShowCodeModal] = useState(false)
   const [generatedCode, setGeneratedCode] = useState<GeneratedCode | null>(null)
+  const [currentCodeFeatureId, setCurrentCodeFeatureId] = useState<string | null>(null)
+  const [isRegeneratingCode, setIsRegeneratingCode] = useState(false)
 
   // Expand/collapse state
   const [expandedFeatures, setExpandedFeatures] = useState<Set<string>>(new Set())
@@ -185,10 +187,29 @@ export function FeatureList({
       )
 
       setGeneratedCode(code)
+      setCurrentCodeFeatureId(featureId)
       setShowCodeModal(true)
     } catch (error) {
       console.error('Code generation failed:', error)
       alert('Failed to generate code. Please try again.')
+    }
+  }
+
+  const handleRegenerateCode = async () => {
+    if (!generatedCode) {
+      return
+    }
+
+    setIsRegeneratingCode(true)
+
+    try {
+      const improvedCode = await codeGenerationService.regenerateCodeWithAI(generatedCode)
+      setGeneratedCode(improvedCode)
+    } catch (error: any) {
+      console.error('Code regeneration failed:', error)
+      alert(error.message || 'Failed to regenerate code. Please try again.')
+    } finally {
+      setIsRegeneratingCode(false)
     }
   }
 
@@ -207,6 +228,7 @@ export function FeatureList({
   const handleCloseCodeModal = () => {
     setShowCodeModal(false)
     setGeneratedCode(null)
+    setCurrentCodeFeatureId(null)
   }
 
   const handleRegenerateSteps = (featureId: string, e: React.MouseEvent) => {
@@ -843,6 +865,8 @@ export function FeatureList({
         generatedCode={generatedCode}
         onClose={handleCloseCodeModal}
         onExport={handleExportCode}
+        onRegenerate={handleRegenerateCode}
+        isRegenerating={isRegeneratingCode}
       />
     </div>
   )

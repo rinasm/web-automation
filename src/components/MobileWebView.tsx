@@ -1,10 +1,12 @@
 import { useEffect, useState, useCallback, forwardRef, useImperativeHandle, useRef } from 'react'
-import { Loader, Wifi, AlertCircle, Smartphone, RefreshCw, Target } from 'lucide-react'
+import { Loader, Wifi, AlertCircle, Smartphone, RefreshCw, Target, Network } from 'lucide-react'
 import { MobileDevice, AndroidDevice, IOSDevice } from '../types/mobileDevice'
 import { cdpConnectionManager } from '../utils/cdpConnection'
 import { appiumConnectionManager } from '../utils/appiumConnection'
 import { useMobileDeviceStore } from '../store/mobileDeviceStore'
+import { useNetworkStore } from '../store/networkStore'
 import { useAppConfigStore } from '../store/appConfigStore'
+import { startNetworkMonitoring, stopNetworkMonitoring } from '../services/networkListener'
 import { MobileFlowExtractor } from '../utils/flowExtractor'
 import { getXPathForElement } from '../utils/xpath'
 import { mobileEventListenerManager } from '../services/mobileEventListener'
@@ -70,6 +72,7 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
     const { getDeviceConnection, setDeviceConnection } = useMobileDeviceStore()
     const { targetAppBundleId, targetAppName } = useAppConfigStore()
     const { addSDKEvent } = useRecordingStore()
+    const { isPanelVisible, setPanelVisible } = useNetworkStore()
 
     /**
      * Initialize connection to device
@@ -300,6 +303,42 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
         console.error('❌ [MobileWebView] Failed to refresh network:', error)
       }
     }, [])
+
+    /**
+     * Toggle network monitoring
+     */
+    const toggleNetworkMonitoring = useCallback(async () => {
+      const newVisibility = !isPanelVisible
+      setPanelVisible(newVisibility)
+
+      if (sdkDevice && newVisibility) {
+        // Send startNetworkMonitoring command to SDK (same pattern as recording)
+        console.log('📤 [MobileWebView] Sending startNetworkMonitoring command to SDK:', sdkDevice.bundleId)
+        try {
+          const result = await window.electronAPI.sendSDKCommand(sdkDevice.bundleId, 'startNetworkMonitoring')
+          if (result.success) {
+            console.log('✅ [MobileWebView] Network monitoring started successfully')
+          } else {
+            console.warn('⚠️ [MobileWebView] Failed to start network monitoring:', result.error)
+          }
+        } catch (error) {
+          console.error('❌ [MobileWebView] Error starting network monitoring:', error)
+        }
+      } else if (sdkDevice && !newVisibility) {
+        // Send stopNetworkMonitoring command to SDK
+        console.log('📤 [MobileWebView] Sending stopNetworkMonitoring command to SDK:', sdkDevice.bundleId)
+        try {
+          const result = await window.electronAPI.sendSDKCommand(sdkDevice.bundleId, 'stopNetworkMonitoring')
+          if (result.success) {
+            console.log('✅ [MobileWebView] Network monitoring stopped successfully')
+          } else {
+            console.warn('⚠️ [MobileWebView] Failed to stop network monitoring:', result.error)
+          }
+        } catch (error) {
+          console.error('❌ [MobileWebView] Error stopping network monitoring:', error)
+        }
+      }
+    }, [isPanelVisible, setPanelVisible, sdkDevice])
 
     /**
      * Start selector capture mode
@@ -837,10 +876,26 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
           {device?.os === 'ios' && (
             <>
               {sdkConnected && sdkDevice ? (
-                <div className="flex items-center gap-2 px-3 py-1 bg-purple-600 rounded-full">
-                  <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-                  <span className="text-xs text-white font-medium">SDK Connected</span>
-                  <div className="text-xs text-purple-200">{sdkDevice.deviceName || 'iOS Device'}</div>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 px-3 py-1 bg-purple-600 rounded-full">
+                    <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                    <span className="text-xs text-white font-medium">SDK Connected</span>
+                    <div className="text-xs text-purple-200">{sdkDevice.deviceName || 'iOS Device'}</div>
+                  </div>
+
+                  {/* Track Network Toggle */}
+                  <button
+                    onClick={toggleNetworkMonitoring}
+                    className={`flex items-center gap-2 px-3 py-1 rounded-full font-medium transition-colors ${
+                      isPanelVisible
+                        ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                        : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                    }`}
+                    title="Toggle network monitoring panel"
+                  >
+                    <Network size={14} />
+                    <span className="text-xs">Track Network</span>
+                  </button>
                 </div>
               ) : (
                 <button

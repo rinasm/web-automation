@@ -4,6 +4,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Generic invoke for any IPC channel
   invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args),
 
+  // Generic event listener with unsubscribe
+  on: (channel: string, callback: (...args: any[]) => void) => {
+    const listener = (_event: any, ...args: any[]) => callback(...args);
+    ipcRenderer.on(channel, listener);
+    // Return unsubscribe function
+    return () => {
+      ipcRenderer.removeListener(channel, listener);
+    };
+  },
+
   // Specific methods for backwards compatibility
   getXPath: (element: any) => ipcRenderer.invoke('get-xpath', element),
   executeFlow: (steps: any[]) => ipcRenderer.invoke('execute-flow', steps),
@@ -35,8 +45,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('sdk:sdk-view-hierarchy-response', (_event, data) => callback(data));
   },
 
-  // Send command to SDK (start/stop recording)
-  sendSDKCommand: (deviceId: string, commandType: 'startRecording' | 'stopRecording') => {
+  // Send command to SDK (start/stop recording, network monitoring)
+  sendSDKCommand: (deviceId: string, commandType: 'startRecording' | 'stopRecording' | 'startNetworkMonitoring' | 'stopNetworkMonitoring') => {
     return ipcRenderer.invoke('sdk:send-command', deviceId, commandType);
   },
 
@@ -66,6 +76,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 // Type definitions for TypeScript
 export interface ElectronAPI {
   invoke: (channel: string, ...args: any[]) => Promise<any>;
+  on: (channel: string, callback: (...args: any[]) => void) => () => void;
   getXPath: (element: any) => Promise<string>;
   executeFlow: (steps: any[]) => Promise<{ success: boolean; message: string }>;
   generateCode: (flow: any) => Promise<string>;
@@ -79,7 +90,7 @@ export interface ElectronAPI {
   onSDKActionResult: (callback: (data: { deviceId: string; result: any }) => void) => void;
   onSDKExecutionLog: (callback: (data: { deviceId: string; log: any }) => void) => void;
   onSDKViewHierarchyResponse: (callback: (data: { deviceId: string; response: any }) => void) => void;
-  sendSDKCommand: (deviceId: string, commandType: 'startRecording' | 'stopRecording') => Promise<{ success: boolean; error?: string }>;
+  sendSDKCommand: (deviceId: string, commandType: 'startRecording' | 'stopRecording' | 'startNetworkMonitoring' | 'stopNetworkMonitoring') => Promise<{ success: boolean; error?: string }>;
   sendToMobileDevice: (deviceId: string, message: any) => Promise<{ success: boolean; error?: string }>;
   refreshSDKNetwork: () => Promise<{ success: boolean }>;
   removeSDKListeners: () => void;

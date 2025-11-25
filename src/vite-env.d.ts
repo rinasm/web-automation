@@ -4,11 +4,12 @@ interface ElectronAPI {
   getXPath: (element: any) => Promise<string>
   executeFlow: (steps: any[]) => Promise<{ success: boolean; message: string }>
   generateCode: (flow: any) => Promise<string>
+  invoke: (channel: string, ...args: any[]) => Promise<any>
 }
 
 declare global {
   interface Window {
-    electronAPI?: ElectronAPI
+    electronAPI: ElectronAPI
   }
 
   namespace JSX {

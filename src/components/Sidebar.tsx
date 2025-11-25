@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, Play, FileText, Settings, ClipboardList, Zap, TrendingUp, Sparkles } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Play, FileText, Settings, ClipboardList, Zap, TrendingUp, Sparkles, Radio } from 'lucide-react'
 import { useStepStore } from '../store/stepStore'
 import { useSettingsStore } from '../store/settingsStore'
 

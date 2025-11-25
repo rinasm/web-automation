@@ -6,15 +6,18 @@
  */
 
 import { useState, useCallback, useEffect } from 'react'
-import { Play, Save, Download, Code, AlertCircle } from 'lucide-react'
+import { Play, Save, Download, Code, AlertCircle, Network } from 'lucide-react'
 import { useRecordingStore } from '../store/recordingStore'
 import { useMobileDeviceStore } from '../store/mobileDeviceStore'
 import { useStepStore } from '../store/stepStore'
+import { useNetworkStore } from '../store/networkStore'
 import RecordingControls from './RecordingControls'
 import RecordedEventsList from './RecordedEventsList'
+import { NetworkPanel } from './NetworkPanel'
 import { mobileEventListenerManager } from '../services/mobileEventListener'
 import { convertRecordedFlowToFlow, optimizeRecordedSteps, validateRecordedFlow, exportAsAppiumCode, replaceXPathWithIdentifiers } from '../utils/recordingConverter'
 import { mobileActionExecutorManager } from '../utils/mobileActionExecutor'
+import { startNetworkMonitoring, stopNetworkMonitoring } from '../services/networkListener'
 
 interface MobileRecordingPanelProps {
   onFlowSaved?: (flowId: string) => void
@@ -36,6 +39,7 @@ export default function MobileRecordingPanel({ onFlowSaved }: MobileRecordingPan
 
   const { getCurrentDevice } = useMobileDeviceStore()
   const { addStep } = useStepStore()
+  const { isPanelVisible, setPanelVisible } = useNetworkStore()
 
   const [error, setError] = useState<string | null>(null)
   const [showSaveDialog, setShowSaveDialog] = useState(false)
@@ -44,6 +48,21 @@ export default function MobileRecordingPanel({ onFlowSaved }: MobileRecordingPan
   const [isPlaying, setIsPlaying] = useState(false)
 
   const currentDevice = getCurrentDevice()
+
+  /**
+   * Toggle network panel
+   */
+  const toggleNetworkPanel = useCallback(async () => {
+    const newVisibility = !isPanelVisible
+    setPanelVisible(newVisibility)
+
+    // Start/stop network monitoring when panel is opened/closed
+    if (currentDevice && newVisibility) {
+      await startNetworkMonitoring(currentDevice.id)
+    } else if (currentDevice && !newVisibility) {
+      await stopNetworkMonitoring(currentDevice.id)
+    }
+  }, [isPanelVisible, setPanelVisible, currentDevice])
 
   /**
    * Handle start recording
@@ -288,16 +307,32 @@ export default function MobileRecordingPanel({ onFlowSaved }: MobileRecordingPan
   }, [status, currentDevice])
 
   return (
-    <div className="h-full flex flex-col bg-gray-900 p-4 gap-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-white">Mobile Flow Recording</h2>
-        {currentDevice && (
-          <div className="text-sm text-gray-400">
-            Device: <span className="text-white font-medium">{currentDevice.name}</span>
+    <>
+      <div className="h-full flex flex-col bg-gray-900 p-4 gap-4">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold text-white">Mobile Flow Recording</h2>
+          <div className="flex items-center gap-4">
+            {currentDevice && (
+              <div className="text-sm text-gray-400">
+                Device: <span className="text-white font-medium">{currentDevice.name}</span>
+              </div>
+            )}
+            {/* Network Panel Toggle */}
+            <button
+              onClick={toggleNetworkPanel}
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg font-medium transition-colors ${
+                isPanelVisible
+                  ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                  : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+              }`}
+              title="Toggle network panel"
+            >
+              <Network size={16} />
+              Network
+            </button>
           </div>
-        )}
-      </div>
+        </div>
 
       {/* Error Alert */}
       {error && (
@@ -422,5 +457,12 @@ export default function MobileRecordingPanel({ onFlowSaved }: MobileRecordingPan
         </div>
       )}
     </div>
+
+    {/* Network Panel */}
+    <NetworkPanel
+      isVisible={isPanelVisible}
+      onClose={() => setPanelVisible(false)}
+    />
+  </>
   )
 }

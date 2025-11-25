@@ -127,6 +127,8 @@ struct SDKCommand: Codable {
         case ping
         case executeAction
         case getViewHierarchy
+        case startNetworkMonitoring
+        case stopNetworkMonitoring
     }
 
     struct CommandPayload: Codable {
@@ -230,6 +232,51 @@ struct ViewHierarchyResponseEvent: SDKEvent {
     init(error: String) {
         self.success = false
         self.hierarchy = nil
+        self.error = error
+    }
+}
+
+// MARK: - Network Event
+
+/// Network request/response event for debugging HTTP traffic
+public struct NetworkEvent: SDKEvent {
+    public let type: String = "network"
+    public let timestamp: TimeInterval = Date().timeIntervalSince1970
+    public let requestId: String
+    public let method: String
+    public let url: String
+    public let requestHeaders: [String: String]
+    public let requestBody: String? // Base64 encoded
+    public let requestBodySize: Int
+    public let responseStatus: Int?
+    public let responseHeaders: [String: String]
+    public let responseBody: String? // Base64 encoded
+    public let responseBodySize: Int
+    public let responseMimeType: String?
+    public let startTime: Int // Unix timestamp in milliseconds
+    public let endTime: Int? // Unix timestamp in milliseconds
+    public let totalDuration: Int // milliseconds
+    public let waitTime: Int // Time waiting for first byte (milliseconds)
+    public let downloadTime: Int // Time downloading response (milliseconds)
+    public let error: String?
+
+    public init(requestId: String, method: String, url: String, requestHeaders: [String: String], requestBody: String?, requestBodySize: Int, responseStatus: Int?, responseHeaders: [String: String], responseBody: String?, responseBodySize: Int, responseMimeType: String?, startTime: Int, endTime: Int?, totalDuration: Int, waitTime: Int, downloadTime: Int, error: String?) {
+        self.requestId = requestId
+        self.method = method
+        self.url = url
+        self.requestHeaders = requestHeaders
+        self.requestBody = requestBody
+        self.requestBodySize = requestBodySize
+        self.responseStatus = responseStatus
+        self.responseHeaders = responseHeaders
+        self.responseBody = responseBody
+        self.responseBodySize = responseBodySize
+        self.responseMimeType = responseMimeType
+        self.startTime = startTime
+        self.endTime = endTime
+        self.totalDuration = totalDuration
+        self.waitTime = waitTime
+        self.downloadTime = downloadTime
         self.error = error
     }
 }
