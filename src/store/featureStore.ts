@@ -39,8 +39,10 @@ export const useFeatureStore = create<FeatureState>()(
           name,
           descriptionWeb: undefined,
           descriptionMobile: undefined,
+          descriptionDesktop: undefined,
           stepsWeb: [],
           stepsMobile: [],
+          stepsDesktop: [],
           status: 'draft',
           createdAt: Date.now(),
           lastEdited: Date.now()
@@ -94,10 +96,16 @@ export const useFeatureStore = create<FeatureState>()(
                 stepsWeb: [...f.stepsWeb, { ...step, order: f.stepsWeb.length }],
                 lastEdited: Date.now()
               }
-            } else {
+            } else if (platform === 'mobile') {
               return {
                 ...f,
                 stepsMobile: [...f.stepsMobile, { ...step, order: f.stepsMobile.length }],
+                lastEdited: Date.now()
+              }
+            } else {
+              return {
+                ...f,
+                stepsDesktop: [...f.stepsDesktop, { ...step, order: f.stepsDesktop.length }],
                 lastEdited: Date.now()
               }
             }
@@ -118,6 +126,9 @@ export const useFeatureStore = create<FeatureState>()(
               stepsMobile: f.stepsMobile.map((s) =>
                 s.id === stepId ? { ...s, ...updates } : s
               ),
+              stepsDesktop: f.stepsDesktop.map((s) =>
+                s.id === stepId ? { ...s, ...updates } : s
+              ),
               lastEdited: Date.now()
             }
           })
@@ -133,6 +144,7 @@ export const useFeatureStore = create<FeatureState>()(
               ...f,
               stepsWeb: f.stepsWeb.filter((s) => s.id !== stepId),
               stepsMobile: f.stepsMobile.filter((s) => s.id !== stepId),
+              stepsDesktop: f.stepsDesktop.filter((s) => s.id !== stepId),
               lastEdited: Date.now()
             }
           })
@@ -144,7 +156,7 @@ export const useFeatureStore = create<FeatureState>()(
           features: state.features.map((f) => {
             if (f.id !== featureId) return f
 
-            const steps = platform === 'web' ? [...f.stepsWeb] : [...f.stepsMobile]
+            const steps = platform === 'web' ? [...f.stepsWeb] : platform === 'mobile' ? [...f.stepsMobile] : [...f.stepsDesktop]
             const [removed] = steps.splice(fromIndex, 1)
             steps.splice(toIndex, 0, removed)
 
@@ -153,8 +165,10 @@ export const useFeatureStore = create<FeatureState>()(
 
             if (platform === 'web') {
               return { ...f, stepsWeb: reorderedSteps, lastEdited: Date.now() }
-            } else {
+            } else if (platform === 'mobile') {
               return { ...f, stepsMobile: reorderedSteps, lastEdited: Date.now() }
+            } else {
+              return { ...f, stepsDesktop: reorderedSteps, lastEdited: Date.now() }
             }
           })
         }))
@@ -169,8 +183,10 @@ export const useFeatureStore = create<FeatureState>()(
 
             if (platform === 'web') {
               return { ...f, stepsWeb: orderedSteps, lastEdited: Date.now() }
-            } else {
+            } else if (platform === 'mobile') {
               return { ...f, stepsMobile: orderedSteps, lastEdited: Date.now() }
+            } else {
+              return { ...f, stepsDesktop: orderedSteps, lastEdited: Date.now() }
             }
           })
         }))

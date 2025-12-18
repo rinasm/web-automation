@@ -212,8 +212,10 @@ class SimulationService {
     // Platform-specific execution
     if (platform === 'web') {
       await this.executeWebAction(action, stepName)
-    } else {
+    } else if (platform === 'mobile') {
       await this.executeMobileAction(action)
+    } else if (platform === 'desktop') {
+      await this.executeDesktopAction(action)
     }
   }
 
@@ -248,9 +250,49 @@ class SimulationService {
   }
 
   /**
+   * Execute desktop action
+   */
+  private async executeDesktopAction(action: Action): Promise<void> {
+    // Convert Step Action to DesktopAction format
+    const desktopAction: any = {
+      id: `action_${Date.now()}`,
+      type: action.type,
+      description: `${action.type} ${action.selector || action.value || ''}`,
+      timestamp: Date.now()
+    }
+
+    // Map coordinates from action selector if it's a coordinate-based action
+    if (action.selector && action.selector.startsWith('coordinates:')) {
+      const coords = action.selector.replace('coordinates:', '').split(',')
+      desktopAction.coordinates = {
+        x: parseInt(coords[0]),
+        y: parseInt(coords[1])
+      }
+    }
+
+    // Add value for type and keyboard actions
+    if (action.value) {
+      desktopAction.value = action.value
+    }
+
+    // Execute via Electron IPC
+    const result = await window.electronAPI.desktop.executeAction(desktopAction)
+
+    if (!result.success) {
+      throw new Error(result.error || 'Desktop action execution failed')
+    }
+  }
+
+  /**
    * Wait for page to finish loading
    */
   private async waitForPageLoad(platform: PlatformType): Promise<void> {
+    // Desktop platform doesn't need page load waiting
+    if (platform === 'desktop') {
+      await this.delay(300) // Short delay for action to complete
+      return
+    }
+
     // Initial stabilization wait
     await this.delay(1000)
 

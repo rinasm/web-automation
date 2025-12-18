@@ -17,7 +17,18 @@
       "Bash(xcrun devicectl device install app --device 00008110-001E38A834C3801E /Users/rinasmusthafa/Library/Developer/Xcode/DerivedData/MyTodoApp-dfmierzzsstxbxfhgsvyiygyaosf/Build/Products/Debug-iphoneos/MyTodoApp.app)",
       "Bash(xcrun devicectl device process launch --device 00008110-001E38A834C3801E com.rinasmusthafa.MyTodoApp)",
       "Bash(xcrun devicectl device install app --device 00008110-001E38A834C3801E /Users/rinasmusthafa/Library/Developer/Xcode/DerivedData/MyTodoApp-fxmzmaolcozxuvfpeymfmyamscuf/Build/Products/Debug-iphoneos/MyTodoApp.app)",
-      "Bash(xcodebuild clean build -scheme MyTodoApp -configuration Debug -destination \"platform=iOS,id=00008110-001E38A834C3801E\" DEVELOPMENT_TEAM=7MFG6W6M8G CODE_SIGN_STYLE=Automatic)"
+      "Bash(xcodebuild clean build -scheme MyTodoApp -configuration Debug -destination \"platform=iOS,id=00008110-001E38A834C3801E\" DEVELOPMENT_TEAM=7MFG6W6M8G CODE_SIGN_STYLE=Automatic)",
+      "Bash(npm install @nut-tree/nut-js active-win node-window-manager)",
+      "Bash(npm install nutjs active-win@latest)",
+      "Bash(npm install get-windows robotjs)",
+      "Bash(npm install --save-dev electron-rebuild)",
+      "Bash(npm install --save-dev @electron/rebuild)",
+      "Bash(npx electron-rebuild)",
+      "Bash(osascript -e 'tell application \"\"System Events\"\"\nset appList to {}\nrepeat with proc in (every process whose background only is false)\nset appInfo to {name of proc, unix id of proc, frontmost of proc}\nset end of appList to appInfo\nend repeat\nreturn appList\nend tell')",
+      "Bash(npm install iohook --save)",
+      "Bash(npm install uiohook-napi --save)",
+      "Bash(open \"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility\")",
+      "Bash(pkill -f electron)"
     ],
     "deny": [],
     "ask": []

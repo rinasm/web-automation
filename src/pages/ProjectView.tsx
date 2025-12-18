@@ -20,9 +20,14 @@ import { NetworkPanel } from '../components/NetworkPanel'
 import Toast, { ToastType } from '../components/Toast'
 import Sidebar from '../components/Sidebar'
 import { ModeToggle } from '../components/ModeToggle'
+import { PlatformToggle } from '../components/PlatformToggle'
 import { MobileDeviceSelector } from '../components/MobileDeviceSelector'
 import { DeviceConnectionDialog } from '../components/DeviceConnectionDialog'
 import { ApiKeysSettings } from '../components/ApiKeysSettings'
+import { DesktopAppSelector } from '../components/DesktopAppSelector'
+import { DesktopRecordingPanel } from '../components/DesktopRecordingPanel'
+import { DesktopActionList } from '../components/DesktopActionList'
+import { SavedSequences } from '../components/SavedSequences'
 import { FlowExtractor, MobileFlowExtractor } from '../utils/flowExtractor'
 import { cdpConnectionManager } from '../utils/cdpConnection'
 import { webkitConnectionManager } from '../utils/webkitConnection'
@@ -63,6 +68,9 @@ function ProjectView() {
   // SDK connection state
   const [sdkConnected, setSdkConnected] = useState(false)
   const [sdkDevice, setSdkDevice] = useState<any>(null)
+
+  // Desktop automation state
+  const [desktopRecordedActions, setDesktopRecordedActions] = useState<any[]>([])
 
   const currentProject = projects.find(p => p.id === currentProjectId)
   const currentDevice = getCurrentDevice()
@@ -365,35 +373,54 @@ function ProjectView() {
       case 'flow':
         return (
           <div className="flex-1 flex overflow-hidden relative">
-            {/* Website/Mobile Preview */}
-            <div className="flex-1 bg-gray-100 flex items-center justify-center">
-              {!currentProject.webUrl && !currentProject.url ? (
-                <div className="text-center p-8">
-                  <p className="text-gray-500 text-lg mb-2">No web URL configured for this project</p>
-                  <p className="text-gray-400 text-sm">Please configure a web URL in project settings</p>
+            {/* Website/Mobile/Desktop Preview */}
+            {currentProject?.currentPlatform === 'desktop' ? (
+              /* Desktop Automation View - Full Width Two Panel Layout */
+              <div className="flex-1 flex overflow-hidden">
+                {/* Left: App Selector */}
+                <div className="flex-1 bg-gray-100 p-6 overflow-auto">
+                  <DesktopAppSelector />
                 </div>
-              ) : currentMode === 'mobile' && currentDevice ? (
-                <MobileWebView
-                  url={currentProject.webUrl || currentProject.url || ''}
-                  device={currentDevice}
-                  ref={mobileWebviewRef}
-                  recordingMode={isRecording && recordingPlatform === 'mobile'}
-                  onRecordEvent={handleRecordEvent}
-                  onPageLoad={() => showToast('Mobile page loaded', 'success')}
-                  onError={(error) => showToast(`Mobile error: ${error.message}`, 'error')}
-                />
-              ) : (
-                <WebView
-                  url={currentProject.webUrl || currentProject.url || ''}
-                  ref={webviewRef}
-                  recordingMode={isRecording && recordingPlatform === 'web'}
-                  onRecordEvent={handleRecordEvent}
-                />
-              )}
-            </div>
 
-            {/* Recording Overlay */}
-            {(isRecording || isGeneratingDescription) && (
+                {/* Right: Recording Panel + Saved Sequences */}
+                <div className="w-[400px] bg-white border-l border-gray-200 flex flex-col shadow-lg overflow-auto p-4 space-y-4">
+                  <DesktopRecordingPanel
+                    onActionsRecorded={(actions) => setDesktopRecordedActions(actions)}
+                  />
+                  <SavedSequences />
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Web/Mobile Preview Area */}
+                <div className="flex-1 bg-gray-100 flex items-center justify-center">
+                  {!currentProject.webUrl && !currentProject.url ? (
+                    <div className="text-center p-8">
+                      <p className="text-gray-500 text-lg mb-2">No web URL configured for this project</p>
+                      <p className="text-gray-400 text-sm">Please configure a web URL in project settings</p>
+                    </div>
+                  ) : currentMode === 'mobile' && currentDevice ? (
+                    <MobileWebView
+                      url={currentProject.webUrl || currentProject.url || ''}
+                      device={currentDevice}
+                      ref={mobileWebviewRef}
+                      recordingMode={isRecording && recordingPlatform === 'mobile'}
+                      onRecordEvent={handleRecordEvent}
+                      onPageLoad={() => showToast('Mobile page loaded', 'success')}
+                      onError={(error) => showToast(`Mobile error: ${error.message}`, 'error')}
+                    />
+                  ) : (
+                    <WebView
+                      url={currentProject.webUrl || currentProject.url || ''}
+                      ref={webviewRef}
+                      recordingMode={isRecording && recordingPlatform === 'web'}
+                      onRecordEvent={handleRecordEvent}
+                    />
+                  )}
+                </div>
+
+                {/* Recording Overlay */}
+                {(isRecording || isGeneratingDescription) && (
               <div className="absolute inset-0 pointer-events-none z-50">
                 {/* Recording/Generating Header Bar */}
                 <div className={`${isGeneratingDescription ? 'bg-blue-600' : 'bg-red-600'} text-white px-6 py-4 flex items-center justify-between pointer-events-auto`}>
@@ -460,16 +487,18 @@ function ProjectView() {
               </div>
             )}
 
-            {/* Right: Feature Panel (400px fixed) */}
-            <div className="w-[400px] bg-white border-l border-gray-200 flex flex-col shadow-lg">
-              <FeatureList
-                projectId={currentProjectId!}
-                onCreateFeature={() => setShowFeatureDialog(true)}
-                onSelectFeature={setSelectedFeatureId}
-                selectedFeatureId={selectedFeatureId}
-                webviewRef={webviewRef}
-              />
-            </div>
+                {/* Right: Feature Panel (400px fixed) */}
+                <div className="w-[400px] bg-white border-l border-gray-200 flex flex-col shadow-lg">
+                  <FeatureList
+                    projectId={currentProjectId!}
+                    onCreateFeature={() => setShowFeatureDialog(true)}
+                    onSelectFeature={setSelectedFeatureId}
+                    selectedFeatureId={selectedFeatureId}
+                    webviewRef={webviewRef}
+                  />
+                </div>
+              </>
+            )}
           </div>
         )
       case 'autoflow':
@@ -788,13 +817,13 @@ function ProjectView() {
 
           {/* Mobile Controls & User Info */}
           <div className="flex items-center gap-4">
-            {/* Mobile Mode Toggle */}
-            <ModeToggle
-              className="mr-2"
-            />
+            {/* Platform Toggle (Web/Mobile/Desktop) */}
+            {currentProjectId && (
+              <PlatformToggle projectId={currentProjectId} />
+            )}
 
             {/* Mobile Device Selector */}
-            {currentMode === 'mobile' && (
+            {currentProject?.currentPlatform === 'mobile' && currentMode === 'mobile' && (
               <>
                 <MobileDeviceSelector
                   onConnectDevice={handleConnectDevice}

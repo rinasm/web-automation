@@ -1,11 +1,11 @@
 /**
  * Platform Toggle Component
  *
- * Toggle between Web and Mobile platforms for a project
+ * Toggle between Web, Mobile, and Desktop platforms for a project
  * Clean, simple UI with clear visual feedback
  */
 
-import { Monitor, Smartphone } from 'lucide-react'
+import { Monitor, Smartphone, Laptop } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { PlatformType } from '../types/feature'
 
@@ -55,6 +55,21 @@ export function PlatformToggle({ projectId }: PlatformToggleProps) {
       >
         <Smartphone size={18} />
         <span>Mobile</span>
+      </button>
+
+      {/* Desktop Button */}
+      <button
+        onClick={() => handleToggle('desktop')}
+        className={`
+          flex items-center gap-2 px-4 py-2 rounded-md transition-all font-medium text-sm
+          ${currentPlatform === 'desktop'
+            ? 'bg-purple-600 text-white shadow-sm'
+            : 'text-gray-700 hover:text-gray-900'
+          }
+        `}
+      >
+        <Laptop size={18} />
+        <span>Desktop</span>
       </button>
     </div>
   )

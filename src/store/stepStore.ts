@@ -2,7 +2,28 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { PlatformType } from '../types/feature'
 
-export type ActionType = 'click' | 'type' | 'hover' | 'wait' | 'assert' | 'swipe' | 'scroll'
+export type ActionType =
+  // Web/Mobile actions
+  | 'click'
+  | 'type'
+  | 'hover'
+  | 'wait'
+  | 'assert'
+  | 'swipe'
+  | 'scroll'
+  // Desktop-specific actions
+  | 'app_launch'
+  | 'app_focus'
+  | 'app_quit'
+  | 'window_focus'
+  | 'window_minimize'
+  | 'window_maximize'
+  | 'window_restore'
+  | 'double_click'
+  | 'right_click'
+  | 'keyboard_shortcut'
+  | 'drag_drop'
+  | 'screenshot'
 
 export interface Action {
   id: string

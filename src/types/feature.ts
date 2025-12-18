@@ -3,7 +3,7 @@ import { Step } from '../store/stepStore'
 /**
  * Platform type for multi-platform support
  */
-export type PlatformType = 'web' | 'mobile'
+export type PlatformType = 'web' | 'mobile' | 'desktop'
 
 /**
  * Feature status lifecycle
@@ -17,6 +17,7 @@ export type FeatureStatus = 'draft' | 'generated' | 'needs_selectors' | 'complet
  * For example, "User Login" might have:
  * - Web: Navigate → Fill form → Click button
  * - Mobile: Tap login → Fill username → Fill password → Tap sign in
+ * - Desktop: Launch app → Click login button → Type credentials → Click sign in
  */
 export interface Feature {
   id: string
@@ -24,8 +25,10 @@ export interface Feature {
   name: string
   descriptionWeb?: string
   descriptionMobile?: string
+  descriptionDesktop?: string
   stepsWeb: Step[]
   stepsMobile: Step[]
+  stepsDesktop: Step[]
   status: FeatureStatus
   createdAt: number
   lastEdited: number
