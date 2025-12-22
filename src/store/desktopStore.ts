@@ -201,52 +201,145 @@ export const useDesktopStore = create<DesktopStore>((set, get) => ({
   startRecording: async () => {
     const { selectedApplication } = get();
 
+    if (!selectedApplication) {
+      console.error('No application selected');
+      return;
+    }
+
     // Capture the application info before starting recording
-    const appPid = selectedApplication?.pid || null;
-    const appName = selectedApplication?.name || null;
+    const appName = selectedApplication.name;
 
-    set({
-      isRecording: true,
-      recordedActions: [],
-      recordingApplicationPid: appPid,
-      recordingApplicationName: appName
-    });
+    console.log(`🎯 Preparing to record: ${appName}`);
 
-    // Set the recording application for window-relative coordinates
-    if (appPid && window.electronAPI?.desktop?.setRecordingApplication) {
-      await window.electronAPI.desktop.setRecordingApplication(appPid);
-      console.log(`📌 Set recording application: ${appName} (PID: ${appPid})`);
-    }
+    // Check if app is running and launch/focus it
+    try {
+      console.log(`🔍 Checking if ${appName} is running...`);
+      const apps = await window.electronAPI.desktop.getRunningApplications();
+      console.log(`📋 Found ${apps.length} running applications:`, apps.map((a: any) => `${a.name} (PID: ${a.pid})`).join(', '));
 
-    // Set up listener for real-time action recording
-    if (window.electronAPI?.desktop?.onActionRecorded) {
-      const unsubscribe = window.electronAPI.desktop.onActionRecorded((action) => {
-        console.log('🎯 Real-time action captured:', action);
-        useDesktopStore.getState().addRecordedAction(action);
-      });
+      let matchingApp = apps.find((app: any) => app.name === appName);
 
-      // Store unsubscribe function for cleanup
-      (window as any)._desktopRecordingUnsubscribe = unsubscribe;
-    }
+      if (matchingApp) {
+        // App is running, focus it
+        console.log(`✅ Found running app: ${matchingApp.name} (PID: ${matchingApp.pid})`);
+        const focusResult = await window.electronAPI.desktop.focusApplication(matchingApp.pid);
 
-    if (window.electronAPI?.desktop?.startRecording) {
-      const result = await window.electronAPI.desktop.startRecording();
+        if (focusResult.success) {
+          console.log('✅ Application focused successfully');
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } else {
+          console.error('❌ Failed to focus running application');
+          alert(`Failed to focus "${appName}". Recording cancelled.`);
+          return;
+        }
+      } else {
+        // App not running, need to launch it
+        console.warn(`⚠️ Application "${appName}" not found in running apps, launching...`);
+        console.log(`🚀 Calling launchApplication("${appName}")...`);
 
-      // If recording failed, stop the recording state
-      if (!result.success) {
-        console.error('Failed to start recording:', result.error);
-        set({
-          isRecording: false,
-          recordingApplicationPid: null,
-          recordingApplicationName: null
-        });
+        const launchResult = await window.electronAPI.desktop.launchApplication(appName);
+        console.log(`📤 Launch result:`, launchResult);
 
-        // Clean up listener
-        if ((window as any)._desktopRecordingUnsubscribe) {
-          (window as any)._desktopRecordingUnsubscribe();
-          (window as any)._desktopRecordingUnsubscribe = null;
+        if (launchResult.success) {
+          console.log(`✅ Successfully launched ${appName}`);
+
+          // Wait for app to fully launch
+          await new Promise(resolve => setTimeout(resolve, 2000));
+
+          // Try multiple times to find the newly launched app
+          let retries = 3;
+          let newMatchingApp = null;
+
+          while (retries > 0 && !newMatchingApp) {
+            console.log(`🔍 Searching for launched app (attempt ${4 - retries}/3)...`);
+            const newApps = await window.electronAPI.desktop.getRunningApplications();
+            console.log(`📋 Found ${newApps.length} apps:`, newApps.map((a: any) => `${a.name} (PID: ${a.pid})`).join(', '));
+
+            newMatchingApp = newApps.find((app: any) => app.name === appName);
+
+            if (newMatchingApp) {
+              console.log(`✅ Found newly launched app: ${newMatchingApp.name} (PID: ${newMatchingApp.pid})`);
+            } else {
+              console.warn(`⚠️ App not found yet, ${retries - 1} retries remaining`);
+              if (retries > 1) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              }
+            }
+            retries--;
+          }
+
+          if (newMatchingApp) {
+            matchingApp = newMatchingApp;
+            const focusResult = await window.electronAPI.desktop.focusApplication(newMatchingApp.pid);
+            if (focusResult.success) {
+              console.log('✅ Application focused successfully');
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            } else {
+              console.error('❌ Failed to focus newly launched application');
+              alert(`Failed to focus "${appName}". Recording cancelled.`);
+              return;
+            }
+          } else {
+            console.error(`❌ Failed to find ${appName} after launching`);
+            alert(`Failed to launch "${appName}". Please start it manually and try again.`);
+            return;
+          }
+        } else {
+          console.error(`❌ Failed to launch ${appName}:`, launchResult.error);
+          alert(`Failed to launch "${appName}". Please start it manually and try again.`);
+          return;
         }
       }
+
+      // At this point, matchingApp should be the running app with correct PID
+      const appPid = matchingApp.pid;
+
+      set({
+        isRecording: true,
+        recordedActions: [],
+        recordingApplicationPid: appPid,
+        recordingApplicationName: appName
+      });
+
+      // Set the recording application for window-relative coordinates
+      if (appPid && window.electronAPI?.desktop?.setRecordingApplication) {
+        await window.electronAPI.desktop.setRecordingApplication(appPid);
+        console.log(`📌 Set recording application: ${appName} (PID: ${appPid})`);
+      }
+
+      // Set up listener for real-time action recording
+      if (window.electronAPI?.desktop?.onActionRecorded) {
+        const unsubscribe = window.electronAPI.desktop.onActionRecorded((action) => {
+          console.log('🎯 Real-time action captured:', action);
+          useDesktopStore.getState().addRecordedAction(action);
+        });
+
+        // Store unsubscribe function for cleanup
+        (window as any)._desktopRecordingUnsubscribe = unsubscribe;
+      }
+
+      if (window.electronAPI?.desktop?.startRecording) {
+        const result = await window.electronAPI.desktop.startRecording();
+
+        // If recording failed, stop the recording state
+        if (!result.success) {
+          console.error('Failed to start recording:', result.error);
+          set({
+            isRecording: false,
+            recordingApplicationPid: null,
+            recordingApplicationName: null
+          });
+
+          // Clean up listener
+          if ((window as any)._desktopRecordingUnsubscribe) {
+            (window as any)._desktopRecordingUnsubscribe();
+            (window as any)._desktopRecordingUnsubscribe = null;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error launching/focusing application:', error);
+      alert(`Error launching/focusing application: ${error}`);
     }
   },
 

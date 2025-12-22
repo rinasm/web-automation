@@ -399,16 +399,29 @@ function ProjectView() {
                       <p className="text-gray-500 text-lg mb-2">No web URL configured for this project</p>
                       <p className="text-gray-400 text-sm">Please configure a web URL in project settings</p>
                     </div>
-                  ) : currentMode === 'mobile' && currentDevice ? (
-                    <MobileWebView
-                      url={currentProject.webUrl || currentProject.url || ''}
-                      device={currentDevice}
-                      ref={mobileWebviewRef}
-                      recordingMode={isRecording && recordingPlatform === 'mobile'}
-                      onRecordEvent={handleRecordEvent}
-                      onPageLoad={() => showToast('Mobile page loaded', 'success')}
-                      onError={(error) => showToast(`Mobile error: ${error.message}`, 'error')}
-                    />
+                  ) : currentProject.currentPlatform === 'mobile' ? (
+                    currentDevice ? (
+                      <MobileWebView
+                        url={currentProject.webUrl || currentProject.url || ''}
+                        device={currentDevice}
+                        ref={mobileWebviewRef}
+                        recordingMode={isRecording && recordingPlatform === 'mobile'}
+                        onRecordEvent={handleRecordEvent}
+                        onPageLoad={() => showToast('Mobile page loaded', 'success')}
+                        onError={(error) => showToast(`Mobile error: ${error.message}`, 'error')}
+                      />
+                    ) : (
+                      <div className="text-center p-8">
+                        <p className="text-gray-500 text-lg mb-2">No mobile device connected</p>
+                        <p className="text-gray-400 text-sm mb-4">Please connect a mobile device to view the mobile preview</p>
+                        <button
+                          onClick={handleConnectDevice}
+                          className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-semibold"
+                        >
+                          Connect Device
+                        </button>
+                      </div>
+                    )
                   ) : (
                     <WebView
                       url={currentProject.webUrl || currentProject.url || ''}
@@ -505,15 +518,28 @@ function ProjectView() {
         return (
           <div className="flex-1 flex overflow-hidden">
             {/* Website/Mobile Preview */}
-            <div className="flex-1 bg-gray-100">
-              {currentMode === 'mobile' && currentDevice ? (
-                <MobileWebView
-                  url={currentProject.webUrl || currentProject.url || ''}
-                  device={currentDevice}
-                  ref={mobileWebviewRef}
-                  onPageLoad={() => showToast('Mobile page loaded', 'success')}
-                  onError={(error) => showToast(`Mobile error: ${error.message}`, 'error')}
-                />
+            <div className="flex-1 bg-gray-100 flex items-center justify-center">
+              {currentProject.currentPlatform === 'mobile' ? (
+                currentDevice ? (
+                  <MobileWebView
+                    url={currentProject.webUrl || currentProject.url || ''}
+                    device={currentDevice}
+                    ref={mobileWebviewRef}
+                    onPageLoad={() => showToast('Mobile page loaded', 'success')}
+                    onError={(error) => showToast(`Mobile error: ${error.message}`, 'error')}
+                  />
+                ) : (
+                  <div className="text-center p-8">
+                    <p className="text-gray-500 text-lg mb-2">No mobile device connected</p>
+                    <p className="text-gray-400 text-sm mb-4">Please connect a mobile device to use Auto Flow</p>
+                    <button
+                      onClick={handleConnectDevice}
+                      className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-semibold"
+                    >
+                      Connect Device
+                    </button>
+                  </div>
+                )
               ) : (
                 <WebView url={currentProject.webUrl || currentProject.url || ''} ref={webviewRef} />
               )}
@@ -533,15 +559,28 @@ function ProjectView() {
         return (
           <div className="flex-1 flex overflow-hidden">
             {/* Website/Mobile Preview */}
-            <div className="flex-1 bg-gray-100">
-              {currentMode === 'mobile' && currentDevice ? (
-                <MobileWebView
-                  url={currentProject.webUrl || currentProject.url || ''}
-                  device={currentDevice}
-                  ref={mobileWebviewRef}
-                  onPageLoad={() => showToast('Mobile page loaded', 'success')}
-                  onError={(error) => showToast(`Mobile error: ${error.message}`, 'error')}
-                />
+            <div className="flex-1 bg-gray-100 flex items-center justify-center">
+              {currentProject.currentPlatform === 'mobile' ? (
+                currentDevice ? (
+                  <MobileWebView
+                    url={currentProject.webUrl || currentProject.url || ''}
+                    device={currentDevice}
+                    ref={mobileWebviewRef}
+                    onPageLoad={() => showToast('Mobile page loaded', 'success')}
+                    onError={(error) => showToast(`Mobile error: ${error.message}`, 'error')}
+                  />
+                ) : (
+                  <div className="text-center p-8">
+                    <p className="text-gray-500 text-lg mb-2">No mobile device connected</p>
+                    <p className="text-gray-400 text-sm mb-4">Please connect a mobile device to use AI Explore</p>
+                    <button
+                      onClick={handleConnectDevice}
+                      className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-semibold"
+                    >
+                      Connect Device
+                    </button>
+                  </div>
+                )
               ) : (
                 <WebView url={currentProject.webUrl || currentProject.url || ''} ref={webviewRef} />
               )}

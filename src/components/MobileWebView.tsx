@@ -68,6 +68,7 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
     const [sdkConnected, setSdkConnected] = useState(false)
     const [sdkDevice, setSdkDevice] = useState<any>(null)
     const [recordingMode_SDK, setRecordingMode_SDK] = useState('appium') // 'appium' or 'sdk'
+    const [isRefreshingSDK, setIsRefreshingSDK] = useState(false)
 
     const { getDeviceConnection, setDeviceConnection } = useMobileDeviceStore()
     const { targetAppBundleId, targetAppName } = useAppConfigStore()
@@ -296,13 +297,34 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
      */
     const refreshSDKNetwork = useCallback(async () => {
       console.log('🔄 [MobileWebView] Refreshing SDK network detection...')
+      setIsRefreshingSDK(true)
+
       try {
-        await (window as any).electronAPI.refreshSDKNetwork()
-        console.log('✅ [MobileWebView] Network refresh requested')
+        // Request backend to refresh network detection and republish Bonjour service
+        const result = await (window as any).electronAPI.refreshSDKNetwork()
+        console.log('✅ [MobileWebView] Network refresh requested:', result)
+
+        // Give the SDK device time to reconnect (check every 500ms for up to 5 seconds)
+        let retries = 10
+        while (retries > 0 && !sdkConnected) {
+          await new Promise(resolve => setTimeout(resolve, 500))
+          retries--
+        }
+
+        if (sdkConnected) {
+          console.log('✅ [MobileWebView] SDK device reconnected successfully')
+        } else {
+          console.warn('⚠️ [MobileWebView] SDK device did not reconnect. Make sure:')
+          console.warn('   1. MyTodoApp is running on your iPhone')
+          console.warn('   2. iPhone and Mac are on the same WiFi network')
+          console.warn('   3. Network permissions are granted')
+        }
       } catch (error) {
         console.error('❌ [MobileWebView] Failed to refresh network:', error)
+      } finally {
+        setIsRefreshingSDK(false)
       }
-    }, [])
+    }, [sdkConnected])
 
     /**
      * Toggle network monitoring
@@ -900,12 +922,21 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
               ) : (
                 <button
                   onClick={refreshSDKNetwork}
-                  className="flex items-center gap-2 px-3 py-1 bg-red-600 hover:bg-red-700 rounded-full cursor-pointer transition-colors"
-                  title="Click to refresh network detection"
+                  disabled={isRefreshingSDK}
+                  className={`flex items-center gap-2 px-3 py-1 rounded-full transition-colors ${
+                    isRefreshingSDK
+                      ? 'bg-yellow-600 cursor-wait'
+                      : 'bg-red-600 hover:bg-red-700 cursor-pointer'
+                  }`}
+                  title={isRefreshingSDK ? 'Refreshing network detection...' : 'Click to refresh network detection'}
                 >
-                  <div className="w-2 h-2 bg-white rounded-full"></div>
-                  <span className="text-xs text-white font-medium">SDK Not Connected</span>
-                  <div className="text-xs text-red-200">click to refresh</div>
+                  <div className={`w-2 h-2 bg-white rounded-full ${isRefreshingSDK ? 'animate-pulse' : ''}`}></div>
+                  <span className="text-xs text-white font-medium">
+                    {isRefreshingSDK ? 'Refreshing...' : 'SDK Not Connected'}
+                  </span>
+                  <div className="text-xs text-white opacity-75">
+                    {isRefreshingSDK ? 'please wait' : 'click to refresh'}
+                  </div>
                 </button>
               )}
             </>

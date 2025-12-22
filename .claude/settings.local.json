@@ -28,7 +28,17 @@
       "Bash(npm install iohook --save)",
       "Bash(npm install uiohook-napi --save)",
       "Bash(open \"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility\")",
-      "Bash(pkill -f electron)"
+      "Bash(pkill -f electron)",
+      "Bash(chmod +x ios-setup-diagnostic.sh)",
+      "Bash(xcodebuild clean -project WebDriverAgent.xcodeproj -scheme WebDriverAgentRunner -destination 'id=00008110-001E38A834C3801E')",
+      "Bash(xcodebuild build-for-testing -project WebDriverAgent.xcodeproj -scheme WebDriverAgentRunner -destination 'id=00008110-001E38A834C3801E' DEVELOPMENT_TEAM=7MFG6W6M8G CODE_SIGN_IDENTITY=\"iPhone Developer\")",
+      "Bash(xcodebuild build-for-testing -project WebDriverAgent.xcodeproj -scheme WebDriverAgentRunner -destination 'id=00008110-001E38A834C3801E' -allowProvisioningUpdates DEVELOPMENT_TEAM=7MFG6W6M8G CODE_SIGN_IDENTITY=\"iPhone Developer\")",
+      "Bash(open WebDriverAgent.xcodeproj)",
+      "Bash(xcodebuild build-for-testing -project WebDriverAgent.xcodeproj -scheme WebDriverAgentRunner -destination 'id=00008110-001E38A834C3801E' -allowProvisioningUpdates)",
+      "Bash(tee /tmp/wda_build.log)",
+      "Bash(xcodebuild test-without-building -xctestrun \"/Users/rinasmusthafa/Library/Developer/Xcode/DerivedData/WebDriverAgent-gvkrsjavlopkdecmjvecootlunlj/Build/Products/WebDriverAgentRunner_iphoneos26.1-arm64.xctestrun\" -destination 'id=00008110-001E38A834C3801E' -allowProvisioningUpdates)",
+      "Bash(xcodebuild clean -project MyTodoApp.xcodeproj -scheme MyTodoApp -configuration Debug)",
+      "Bash(xcodebuild build -project MyTodoApp.xcodeproj -scheme MyTodoApp -configuration Debug -destination \"platform=iOS,id=00008110-001E38A834C3801E\" -allowProvisioningUpdates DEVELOPMENT_TEAM=7MFG6W6M8G CODE_SIGN_STYLE=Automatic)"
     ],
     "deny": [],
     "ask": []

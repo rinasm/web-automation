@@ -11,7 +11,7 @@ interface AppConfigState extends AppConfig {
 }
 
 export const useAppConfigStore = create<AppConfigState>((set) => ({
-  // Default: Auto-launch MyTodoApp
+  // Default: Auto-launch MyTodoApp (set to null for Safari browser mode)
   targetAppBundleId: 'com.rinasmusthafa.MyTodoApp',
   targetAppName: 'My Todos',
 

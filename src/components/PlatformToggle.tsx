@@ -7,6 +7,7 @@
 
 import { Monitor, Smartphone, Laptop } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
+import { useMobileDeviceStore } from '../store/mobileDeviceStore'
 import { PlatformType } from '../types/feature'
 
 interface PlatformToggleProps {
@@ -15,6 +16,7 @@ interface PlatformToggleProps {
 
 export function PlatformToggle({ projectId }: PlatformToggleProps) {
   const { projects, setPlatform } = useProjectStore()
+  const { setMode } = useMobileDeviceStore()
 
   const project = projects.find((p: any) => p.id === projectId)
   const currentPlatform: PlatformType = project?.currentPlatform || 'web'
@@ -22,6 +24,13 @@ export function PlatformToggle({ projectId }: PlatformToggleProps) {
   const handleToggle = (platform: PlatformType) => {
     if (platform !== currentPlatform) {
       setPlatform(projectId, platform)
+
+      // Sync the mode in mobileDeviceStore
+      if (platform === 'mobile') {
+        setMode('mobile')
+      } else if (platform === 'web' || platform === 'desktop') {
+        setMode('web')
+      }
     }
   }
 
