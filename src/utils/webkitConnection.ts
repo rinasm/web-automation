@@ -166,7 +166,6 @@ export class WebKitConnectionManager {
 
     // iOS WebKit protocol does not support screenshots
     // Return a placeholder gray image instead of throwing an error
-    console.log('🍎 [WebKit] Screenshot not supported for iOS, returning placeholder')
 
     // Return a 1x1 gray pixel as base64 PNG (placeholder)
     return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mM8c+bMfwAGfgLYW8j+YAAAAABJRU5ErkJggg=='

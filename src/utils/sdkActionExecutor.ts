@@ -112,6 +112,95 @@ export class SDKActionExecutor {
   }
 
   /**
+   * Take screenshot via SDK
+   * @param format Image format ('png' or 'jpeg', default: 'png')
+   * @returns Base64-encoded screenshot image
+   */
+  async takeScreenshot(format: 'png' | 'jpeg' = 'png'): Promise<string | null> {
+    const screenshotId = `screenshot_${this.deviceId}_${Date.now()}`
+
+    // Build screenshot command
+    const command = {
+      type: 'screenshot',
+      timestamp: Date.now() / 1000,
+      payload: {
+        actionType: format // Reuse actionType field for format
+      }
+    }
+
+    try {
+      // Send command and wait for response
+      const result = await this.sendScreenshotCommand(screenshotId, command)
+
+      if (result.success && result.image) {
+        return result.image
+      } else {
+        console.error(`❌ [SDKActionExecutor] Screenshot failed: ${result.error || 'Unknown error'}`)
+        return null
+      }
+    } catch (error) {
+      console.error(`❌ [SDKActionExecutor] Screenshot error:`, error)
+      return null
+    }
+  }
+
+  /**
+   * Send screenshot command to SDK and wait for result
+   */
+  private sendScreenshotCommand(screenshotId: string, command: any): Promise<{
+    success: boolean
+    image?: string
+    error?: string
+  }> {
+    return new Promise((resolve, reject) => {
+      // Set timeout (10 seconds for screenshot - might be large)
+      const timeout = setTimeout(() => {
+        this.pendingActions.delete(screenshotId)
+        reject(new Error(`Screenshot timed out after 10000ms`))
+      }, 10000)
+
+      // Store pending promise (reuse pendingActions map)
+      this.pendingActions.set(screenshotId, {
+        resolve: (result: any) => resolve(result),
+        reject,
+        timeout
+      })
+
+      // Send command via IPC to WebSocket server
+      if (window.electronAPI) {
+        window.electronAPI.sendToMobileDevice(this.deviceId, command)
+      } else {
+        clearTimeout(timeout)
+        this.pendingActions.delete(screenshotId)
+        reject(new Error('Electron API not available'))
+      }
+    })
+  }
+
+  /**
+   * Handle screenshot result from SDK
+   */
+  handleScreenshotResult(result: {
+    success: boolean
+    image?: string
+    format?: string
+    error?: string
+  }): void {
+    // Screenshot results don't have actionId, so we need to find the pending screenshot by type
+    // For simplicity, resolve the first pending screenshot (since they're usually sequential)
+    for (const [id, pending] of this.pendingActions.entries()) {
+      if (id.startsWith('screenshot_')) {
+        clearTimeout(pending.timeout)
+        this.pendingActions.delete(id)
+        pending.resolve(result)
+        return
+      }
+    }
+
+    // Silently ignore if no pending screenshot found (likely was cancelled)
+  }
+
+  /**
    * Send command to SDK and wait for result
    */
   private sendCommandAndWait(actionId: string, command: any): Promise<SDKActionExecutionResult> {
@@ -247,6 +336,13 @@ class SDKActionExecutorManager {
       console.log(`%c${message}`, 'color: #00ff00; font-weight: bold; background-color: #001a00; padding: 4px;')
     })
 
+    // Listen for screenshot results
+    if (window.electronAPI.onSDKScreenshotResult) {
+      window.electronAPI.onSDKScreenshotResult((data: { deviceId: string; result: any }) => {
+        this.handleScreenshotResult(data.deviceId, data.result)
+      })
+    }
+
     this.isListenerSetup = true
     console.log('📱 [SDKActionExecutorManager] Event listener setup complete')
   }
@@ -278,6 +374,17 @@ class SDKActionExecutorManager {
     } else {
       console.warn(`📱 [SDKActionExecutorManager] No executor found for device: ${deviceId}`)
     }
+  }
+
+  /**
+   * Handle screenshot result from any device
+   */
+  handleScreenshotResult(deviceId: string, result: any): void {
+    const executor = this.executors.get(deviceId)
+    if (executor) {
+      executor.handleScreenshotResult(result)
+    }
+    // Silently ignore if executor not found (device may have disconnected)
   }
 
   /**

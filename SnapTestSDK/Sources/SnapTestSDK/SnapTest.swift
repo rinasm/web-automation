@@ -256,6 +256,8 @@ extension SnapTest: WebSocketManagerDelegate {
             startNetworkMonitoring()
         case .stopNetworkMonitoring:
             stopNetworkMonitoring()
+        case .screenshot:
+            handleScreenshot(command)
         }
     }
 
@@ -288,6 +290,46 @@ extension SnapTest: WebSocketManagerDelegate {
             // Send response back to desktop
             let response = ViewHierarchyResponseEvent(hierarchy: hierarchy)
             self.webSocketManager?.send(event: response)
+        }
+    }
+
+    /// Handle screenshot command from desktop app
+    private func handleScreenshot(_ command: SDKCommand) {
+        print("📸 [SnapTest SDK] Handling screenshot command...")
+
+        // Execute on main thread since we're accessing UIKit
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+
+            // Extract format from payload (default to PNG)
+            let format = command.payload?.actionType ?? "png" // Reuse actionType field for format
+            let quality: CGFloat = 0.8 // Default JPEG quality
+
+            print("📸 [SnapTest SDK] Capturing screenshot (format: \(format))...")
+
+            // Capture screenshot using ScreenshotCapture
+            let result = ScreenshotCapture.captureForWebSocket(
+                format: format,
+                quality: quality,
+                includeMetadata: false
+            )
+
+            // Send response
+            if result.success, let image = result.image {
+                print("✅ [SnapTest SDK] Screenshot captured successfully (\(image.count) base64 chars)")
+                let response = ScreenshotResponseEvent(
+                    image: image,
+                    format: format,
+                    metadata: result.metadata
+                )
+                self.webSocketManager?.send(event: response)
+            } else {
+                print("❌ [SnapTest SDK] Screenshot capture failed: \(result.error ?? "Unknown error")")
+                let response = ScreenshotResponseEvent(
+                    error: result.error ?? "Failed to capture screenshot"
+                )
+                self.webSocketManager?.send(event: response)
+            }
         }
     }
 

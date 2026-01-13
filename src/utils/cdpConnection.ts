@@ -285,14 +285,11 @@ export class CDPConnectionManager {
       throw new Error('No active CDP connection for device')
     }
 
-    console.log('📱 [CDP] Taking screenshot')
-
     try {
       const { data } = await connection.client.Page.captureScreenshot({
         format: 'png'
       })
 
-      console.log('📱 [CDP] Screenshot captured')
       return `data:image/png;base64,${data}`
     } catch (error: any) {
       console.error('📱 [CDP] Screenshot error:', error)

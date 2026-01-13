@@ -64,7 +64,6 @@ export const ScreenshotRecordingPanel: React.FC<ScreenshotRecordingPanelProps> =
   const handleStart = useCallback(async () => {
     try {
       const recorder = screenshotRecorderManager.createRecorder(device, (event) => {
-        console.log('📸 [PANEL] Event recorded:', event)
         onEventRecorded(event)
       })
 

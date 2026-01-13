@@ -44,6 +44,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onSDKViewHierarchyResponse: (callback: (data: { deviceId: string; response: any }) => void) => {
     ipcRenderer.on('sdk:sdk-view-hierarchy-response', (_event, data) => callback(data));
   },
+  onSDKScreenshotResult: (callback: (data: { deviceId: string; result: any }) => void) => {
+    ipcRenderer.on('sdk:sdk-screenshot-result', (_event, data) => callback(data));
+  },
 
   // Send command to SDK (start/stop recording, network monitoring)
   sendSDKCommand: (deviceId: string, commandType: 'startRecording' | 'stopRecording' | 'startNetworkMonitoring' | 'stopNetworkMonitoring') => {
@@ -70,6 +73,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('sdk:sdk-action-result');
     ipcRenderer.removeAllListeners('sdk:sdk-execution-log');
     ipcRenderer.removeAllListeners('sdk:sdk-view-hierarchy-response');
+    ipcRenderer.removeAllListeners('sdk:sdk-screenshot-result');
   },
 
   // Desktop Automation APIs
@@ -145,6 +149,7 @@ export interface ElectronAPI {
   onSDKActionResult: (callback: (data: { deviceId: string; result: any }) => void) => void;
   onSDKExecutionLog: (callback: (data: { deviceId: string; log: any }) => void) => void;
   onSDKViewHierarchyResponse: (callback: (data: { deviceId: string; response: any }) => void) => void;
+  onSDKScreenshotResult: (callback: (data: { deviceId: string; result: any }) => void) => void;
   sendSDKCommand: (deviceId: string, commandType: 'startRecording' | 'stopRecording' | 'startNetworkMonitoring' | 'stopNetworkMonitoring') => Promise<{ success: boolean; error?: string }>;
   sendToMobileDevice: (deviceId: string, message: any) => Promise<{ success: boolean; error?: string }>;
   refreshSDKNetwork: () => Promise<{ success: boolean }>;

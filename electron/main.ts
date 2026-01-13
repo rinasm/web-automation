@@ -321,7 +321,6 @@ ipcMain.handle('desktop:stop-recording', async () => {
 });
 
 ipcMain.handle('desktop:take-screenshot', async (_event, windowId?: number) => {
-  console.log(`📸 Taking screenshot${windowId ? ` of window ${windowId}` : ''}`);
   return await desktopAutomationService.takeScreenshot(windowId);
 });
 

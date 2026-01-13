@@ -1,14 +1,15 @@
 /**
  * Mobile Action Executor
  *
- * Executes test actions on mobile devices via CDP (Android) or Appium (iOS).
+ * Executes test actions on iOS mobile devices via SnapTest SDK.
  * Handles touch gestures, element interactions, and mobile-specific operations.
+ *
+ * Note: Android support via CDP is deprecated. iOS is supported via SDK only.
  */
 
 import { MobileDevice, AndroidDevice, IOSDevice } from '../types/mobileDevice'
 import { Action } from '../store/flowStore'
 import { cdpConnectionManager } from './cdpConnection'
-import { appiumConnectionManager } from './appiumConnection'
 import {
   performTap,
   performSwipe,
@@ -613,10 +614,16 @@ class MobileActionExecutorManager {
       }))
     }
 
-    // Fall back to Appium-based execution for Android or non-SDK devices
-    console.log(`📱 [MobileActionExecutorManager] Using Appium execution for device: ${device.name}`)
-    const executor = this.getExecutor(device)
-    return await executor.executeActions(actions)
+    // Android and other platforms not currently supported
+    console.error(`❌ [MobileActionExecutorManager] Device OS "${device.os}" is not supported`)
+    console.error(`📱 [MobileActionExecutorManager] Only iOS devices with SnapTest SDK are currently supported`)
+    console.error(`💡 [MobileActionExecutorManager] To use this device, ensure SnapTest SDK is integrated in your iOS app`)
+
+    throw new Error(
+      `Device platform "${device.os}" is not supported. ` +
+      `Only iOS devices with SnapTest SDK integration are supported. ` +
+      `For iOS testing, ensure the SnapTest SDK is embedded in your app and connected via WebSocket.`
+    )
   }
 
   /**
@@ -643,10 +650,14 @@ class MobileActionExecutorManager {
       }
     }
 
-    // Fall back to Appium-based execution for Android or non-SDK devices
-    console.log(`📱 [MobileActionExecutorManager] Using Appium execution for device: ${device.name}`)
-    const executor = this.getExecutor(device)
-    return await executor.executeAction(action)
+    // Android and other platforms not currently supported
+    console.error(`❌ [MobileActionExecutorManager] Device OS "${device.os}" is not supported`)
+    console.error(`📱 [MobileActionExecutorManager] Only iOS devices with SnapTest SDK are currently supported`)
+
+    throw new Error(
+      `Device platform "${device.os}" is not supported. ` +
+      `Only iOS devices with SnapTest SDK integration are supported.`
+    )
   }
 
   /**

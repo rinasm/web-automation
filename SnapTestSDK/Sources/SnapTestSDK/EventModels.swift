@@ -129,6 +129,7 @@ struct SDKCommand: Codable {
         case getViewHierarchy
         case startNetworkMonitoring
         case stopNetworkMonitoring
+        case screenshot
     }
 
     struct CommandPayload: Codable {
@@ -233,6 +234,62 @@ struct ViewHierarchyResponseEvent: SDKEvent {
         self.success = false
         self.hierarchy = nil
         self.error = error
+    }
+}
+
+// MARK: - Screenshot Response Event
+
+/// Response to screenshot command with base64-encoded image
+struct ScreenshotResponseEvent: SDKEvent {
+    let type: String = "screenshotResponse"
+    let timestamp: TimeInterval = Date().timeIntervalSince1970
+    let success: Bool
+    let image: String? // Base64-encoded PNG or JPEG
+    let format: String? // "png" or "jpeg"
+    let error: String?
+    let metadata: [String: Any]?
+
+    init(image: String, format: String = "png", metadata: [String: Any]? = nil) {
+        self.success = true
+        self.image = image
+        self.format = format
+        self.error = nil
+        self.metadata = metadata
+    }
+
+    init(error: String) {
+        self.success = false
+        self.image = nil
+        self.format = nil
+        self.error = error
+        self.metadata = nil
+    }
+
+    // Custom encoding to handle Any type in metadata
+    enum CodingKeys: String, CodingKey {
+        case type, timestamp, success, image, format, error
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(type, forKey: .type)
+        try container.encode(timestamp, forKey: .timestamp)
+        try container.encode(success, forKey: .success)
+        try container.encodeIfPresent(image, forKey: .image)
+        try container.encodeIfPresent(format, forKey: .format)
+        try container.encodeIfPresent(error, forKey: .error)
+        // Note: metadata is not encoded in standard Codable due to [String: Any]
+        // It will be handled separately in WebSocketManager if needed
+    }
+
+    // Decoder implementation (not used, but required by Codable protocol)
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.success = try container.decode(Bool.self, forKey: .success)
+        self.image = try container.decodeIfPresent(String.self, forKey: .image)
+        self.format = try container.decodeIfPresent(String.self, forKey: .format)
+        self.error = try container.decodeIfPresent(String.self, forKey: .error)
+        self.metadata = nil // Not decoded from JSON
     }
 }
 

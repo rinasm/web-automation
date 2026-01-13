@@ -2,16 +2,15 @@ import { useEffect, useState, useCallback, forwardRef, useImperativeHandle, useR
 import { Loader, Wifi, AlertCircle, Smartphone, RefreshCw, Target, Network } from 'lucide-react'
 import { MobileDevice, AndroidDevice, IOSDevice } from '../types/mobileDevice'
 import { cdpConnectionManager } from '../utils/cdpConnection'
-import { appiumConnectionManager } from '../utils/appiumConnection'
 import { useMobileDeviceStore } from '../store/mobileDeviceStore'
 import { useNetworkStore } from '../store/networkStore'
 import { useAppConfigStore } from '../store/appConfigStore'
 import { startNetworkMonitoring, stopNetworkMonitoring } from '../services/networkListener'
 import { MobileFlowExtractor } from '../utils/flowExtractor'
 import { getXPathForElement } from '../utils/xpath'
-import { mobileEventListenerManager } from '../services/mobileEventListener'
+// Removed in Phase 3: import { mobileEventListenerManager } from '../services/mobileEventListener'
 import type { RecordedEvent as NewRecordedEvent } from '../store/recordingStore'
-import { screenshotRecorderManager } from '../services/screenshotRecorder'
+// Removed in Phase 3: import { screenshotRecorderManager } from '../services/screenshotRecorder'
 import { useRecordingStore } from '../store/recordingStore'
 import { Action, useStepStore } from '../store/stepStore'
 import { mobileActionExecutorManager } from '../utils/mobileActionExecutor'
@@ -57,6 +56,7 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
     const [isScreenshotRecording, setIsScreenshotRecording] = useState(false)
     const [isMatchingElement, setIsMatchingElement] = useState(false)
     const imageRef = useRef<HTMLImageElement>(null)
+    const prevRecordingModeRef = useRef(recordingMode)
 
     // Performance: Screenshot caching and throttling
     const [screenshotCache, setScreenshotCache] = useState<Map<string, { data: string; timestamp: number }>>(new Map())
@@ -67,7 +67,7 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
     // SDK mode state
     const [sdkConnected, setSdkConnected] = useState(false)
     const [sdkDevice, setSdkDevice] = useState<any>(null)
-    const [recordingMode_SDK, setRecordingMode_SDK] = useState('appium') // 'appium' or 'sdk'
+    const [recordingMode_SDK, setRecordingMode_SDK] = useState('sdk') // 'sdk' (appium removed in Phase 3)
     const [isRefreshingSDK, setIsRefreshingSDK] = useState(false)
 
     const { getDeviceConnection, setDeviceConnection } = useMobileDeviceStore()
@@ -96,33 +96,17 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
           const extractor = new MobileFlowExtractor(device.id, cdpConnectionManager)
           setFlowExtractor(extractor)
         } else {
-          // Connect via Appium (full featured)
-          console.log('📱 [MobileWebView] Starting Appium server for iOS...')
+          // iOS: Connection handled by SDK WebSocket (no Appium needed)
+          console.log('📱 [MobileWebView] iOS device - using SDK WebSocket connection')
+          console.log('📱 [MobileWebView] Waiting for SDK to connect via WebSocket...')
 
-          // Start Appium server first
-          const serverResult = await (window as any).electronAPI.invoke('mobile:appium-start-server')
+          // For iOS native apps, connection is established via SDK WebSocket
+          // Wait for SDK connection event before setting status to 'connected'
+          setConnectionStatus('connecting')
+          console.log('📱 [MobileWebView] iOS waiting for SDK connection event')
 
-          if (!serverResult.success) {
-            throw new Error(`Failed to start Appium server: ${serverResult.error}`)
-          }
-
-          console.log('📱 [MobileWebView] Appium server started:', serverResult.status)
-
-          // Wait a bit for server to be fully ready
-          await new Promise(resolve => setTimeout(resolve, 2000))
-
-          // Now connect to device - pass bundle ID if configured
-          if (targetAppBundleId) {
-            console.log('📱 [MobileWebView] Launching native app:', targetAppName)
-          }
-          const connection = await appiumConnectionManager.connect(device as IOSDevice, targetAppBundleId || undefined)
-          setDeviceConnection(device.id, connection as any)
-          setConnectionStatus('connected')
-          console.log('📱 [MobileWebView] Appium connection established')
-
-          // Initialize flow extractor
-          const extractor = new MobileFlowExtractor(device.id, appiumConnectionManager)
-          setFlowExtractor(extractor)
+          // Note: Flow extractor not applicable for native iOS apps
+          // SDK handles all actions directly via WebSocket commands
         }
       } catch (err: any) {
         console.error('📱 [MobileWebView] Connection error:', err)
@@ -149,13 +133,13 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
       try {
         if (device.os === 'android') {
           await cdpConnectionManager.navigate(device.id, targetUrl)
+          setCurrentUrl(targetUrl)
+          await captureScreenshot()
+          onPageLoad?.()
         } else {
-          await appiumConnectionManager.navigate(device.id, targetUrl)
+          // iOS native apps: No URL navigation needed (SDK manages app state)
+          console.log('📱 [MobileWebView] iOS native app - navigation not applicable')
         }
-
-        setCurrentUrl(targetUrl)
-        await captureScreenshot()
-        onPageLoad?.()
       } catch (err: any) {
         console.error('📱 [MobileWebView] Navigation error:', err)
         setError(err.message)
@@ -166,7 +150,7 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
     }, [device, connectionStatus, onPageLoad, onError])
 
     /**
-     * Execute JavaScript
+     * Execute JavaScript (Android only - iOS native apps don't support JS)
      */
     const executeJavaScript = useCallback(async (code: string): Promise<any> => {
       if (connectionStatus !== 'connected') {
@@ -176,7 +160,9 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
       if (device.os === 'android') {
         return await cdpConnectionManager.executeJavaScript(device.id, code)
       } else {
-        return await appiumConnectionManager.executeJavaScript(device.id, code)
+        // iOS native apps: No JavaScript context
+        console.warn('📱 [MobileWebView] JavaScript execution not supported for iOS native apps')
+        throw new Error('JavaScript execution not supported for iOS native apps')
       }
     }, [device, connectionStatus])
 
@@ -191,7 +177,7 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
       console.log(`📱 [MobileWebView] Executing ${actions.length} actions on ${device.name}`)
 
       try {
-        // Use manager which routes iOS to SDK execution, Android to Appium
+        // Use manager which routes iOS to SDK execution, Android to CDP
         const results = await mobileActionExecutorManager.executeActions(device, actions)
 
         // Check for failures
@@ -212,7 +198,7 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
     }, [device, connectionStatus])
 
     /**
-     * Take screenshot
+     * Take screenshot (uses SDK for iOS, CDP for Android)
      */
     const takeScreenshot = useCallback(async (): Promise<string> => {
       if (connectionStatus !== 'connected') {
@@ -222,9 +208,22 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
       if (device.os === 'android') {
         return await cdpConnectionManager.takeScreenshot(device.id)
       } else {
-        return await appiumConnectionManager.takeScreenshot(device.id)
+        // iOS: Use SDK screenshot (implemented in Phase 2)
+        // Use bundleId instead of device.id for SDK commands (bundleId is more reliable)
+        const deviceIdentifier = targetAppBundleId || device.id
+
+        const { sdkActionExecutorManager } = await import('../utils/sdkActionExecutor')
+        const executor = sdkActionExecutorManager.getExecutor(deviceIdentifier)
+        const base64Image = await executor.takeScreenshot('png')
+
+        if (!base64Image) {
+          throw new Error('Failed to capture screenshot via SDK')
+        }
+
+        // Return as data URL (same format as CDP screenshots)
+        return `data:image/png;base64,${base64Image}`
       }
-    }, [device, connectionStatus])
+    }, [device, connectionStatus, targetAppBundleId])
 
     /**
      * Capture and display screenshot (with throttling and caching)
@@ -274,7 +273,7 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
         })
       } catch (err: any) {
         // Silently ignore transient errors (expected during fast polling)
-        const ignoredErrors = ['QUEUE_OVERFLOW', 'SESSION_NOT_EXIST']
+        const ignoredErrors = ['QUEUE_OVERFLOW', 'SESSION_NOT_EXIST', 'Screenshot cancelled - recording started']
         if (!ignoredErrors.includes(err.message)) {
           console.error('📱 [MobileWebView] Screenshot error:', err)
         }
@@ -444,7 +443,8 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
       if (device.os === 'android') {
         cdpConnectionManager.executeJavaScript(device.id, script).catch(console.error)
       } else {
-        appiumConnectionManager.executeJavaScript(device.id, script).catch(console.error)
+        // iOS native apps: Selector capture not applicable (no web context)
+        console.warn('📱 [MobileWebView] Selector capture not supported for iOS native apps')
       }
     }, [device, connectionStatus])
 
@@ -491,7 +491,8 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
       if (device.os === 'android') {
         cdpConnectionManager.executeJavaScript(device.id, script).catch(console.error)
       } else {
-        appiumConnectionManager.executeJavaScript(device.id, script).catch(console.error)
+        // iOS native apps: Selector capture not applicable (no web context)
+        console.warn('📱 [MobileWebView] Selector capture cleanup not needed for iOS native apps')
       }
     }, [device, isCapturingSelector])
 
@@ -519,14 +520,15 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
           let result
           if (device.os === 'android') {
             result = await cdpConnectionManager.executeJavaScript(device.id, script)
-          } else {
-            result = await appiumConnectionManager.executeJavaScript(device.id, script)
-          }
 
-          if (result) {
-            console.log('📱 [MobileWebView] Element selected:', result)
-            stopSelectorCapture()
-            onElementSelected?.(result.selector, result)
+            if (result) {
+              console.log('📱 [MobileWebView] Element selected:', result)
+              stopSelectorCapture()
+              onElementSelected?.(result.selector, result)
+            }
+          } else {
+            // iOS native apps: Selector checking not applicable
+            console.warn('📱 [MobileWebView] Selector checking not supported for iOS native apps')
           }
         } catch (error) {
           console.error('📱 [MobileWebView] Error checking captured selector:', error)
@@ -544,9 +546,10 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
 
       // Listen for SDK connections
       window.electronAPI.onSDKConnected((device) => {
-        console.log('📱 [SDK] Device connected:', device)
+        console.log('🟢 [MobileWebView] SDK connected via WebSocket:', device)
         setSdkConnected(true)
         setSdkDevice(device)
+        setConnectionStatus('connected') // NOW screenshots can start!
       })
 
       // Listen for SDK disconnections
@@ -596,34 +599,10 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
               console.error('❌ [iOS Parser] Error:', error.message)
             }
           } else if (enrichedEvent.coordinates) {
-            // FALLBACK: iOS debugDescription not available, use WDA
-            console.log('⚠️  [Fallback] iOS debugDescription not available, falling back to WDA')
-
-            const connection = appiumConnectionManager.getConnection(device.id)
-            if (connection?.session) {
-              const sessionId = connection.session.sessionId
-              const { x, y } = enrichedEvent.coordinates
-
-              try {
-                const result = await window.electronAPI.invoke('mobile:wda-find-element-at-coordinates', {
-                  sessionId,
-                  x,
-                  y
-                })
-
-                if (result.success && result.elementInfo?.accessibilityId) {
-                  console.log(`✅ [WDA Fallback] Found accessibility ID: ${result.elementInfo.accessibilityId}`)
-
-                  if (!enrichedEvent.element) {
-                    enrichedEvent.element = {}
-                  }
-                  enrichedEvent.element.accessibilityIdentifier = result.elementInfo.accessibilityId
-                  enrichedEvent.element.wdaEnriched = true
-                }
-              } catch (error: any) {
-                console.error('❌ [WDA Fallback] Error:', error.message)
-              }
-            }
+            // FALLBACK: iOS debugDescription not available
+            // WDA fallback removed in Phase 3 - SDK hierarchy provides element info
+            console.log('⚠️  [Fallback] iOS debugDescription not available - element may lack accessibilityId')
+            console.log('⚠️  [Fallback] Ensure SDK sends viewHierarchyDebugDescription for all events')
           }
 
           addSDKEvent(enrichedEvent)
@@ -677,7 +656,8 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
         if (device.os === 'android') {
           cdpConnectionManager.disconnect(device.id).catch(() => {})
         } else {
-          appiumConnectionManager.disconnect(device.id).catch(() => {})
+          // iOS: SDK connection managed by WebSocket server - no disconnect needed
+          console.log('📱 [MobileWebView] iOS cleanup - SDK connection remains active')
         }
       }
     }, [device.id])
@@ -692,18 +672,73 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
     }, [connectionStatus, url])
 
     /**
-     * Auto-refresh screenshot (ultra high-speed polling for USB connections)
-     * Pauses when matching elements to avoid conflicts
+     * Auto-refresh screenshot (balanced polling for smooth mirroring without performance impact)
+     * Pauses when matching elements or recording to avoid SDK resource contention
      */
     useEffect(() => {
-      if (connectionStatus === 'connected' && !isLoading && !isMatchingElement) {
+      if (connectionStatus === 'connected' && !isLoading && !isMatchingElement && !recordingMode) {
+        console.log('📸 [MobileWebView] Starting screenshot polling (1 FPS)')
         const interval = setInterval(() => {
           captureScreenshot()
-        }, 25) // 25ms polling = 40 FPS (ultra-smooth real-time mirroring for USB)
+        }, 1000) // 1000ms polling = 1 FPS (smooth mirroring without memory issues)
 
-        return () => clearInterval(interval)
+        return () => {
+          console.log('📸 [MobileWebView] Stopping screenshot polling')
+          clearInterval(interval)
+        }
+      } else {
+        if (recordingMode) {
+          console.log('📸 [MobileWebView] Screenshot polling paused - recording active')
+        }
       }
-    }, [connectionStatus, isLoading, isMatchingElement, captureScreenshot])
+    }, [connectionStatus, isLoading, isMatchingElement, recordingMode, captureScreenshot])
+
+    /**
+     * Cancel pending screenshots when recording starts
+     */
+    useEffect(() => {
+      if (recordingMode && !prevRecordingModeRef.current && device.os === 'ios') {
+        console.log('📸 [MobileWebView] Recording started - clearing pending screenshots')
+        const clearPendingScreenshots = async () => {
+          try {
+            const deviceIdentifier = targetAppBundleId || device.id
+            const { sdkActionExecutorManager } = await import('../utils/sdkActionExecutor')
+            const executor = sdkActionExecutorManager.getExecutor(deviceIdentifier)
+
+            // Clear only screenshot requests (not action requests)
+            const pendingKeys = Array.from((executor as any).pendingActions.keys())
+            pendingKeys.forEach((key: string) => {
+              if (key.startsWith('screenshot_')) {
+                console.log(`📸 [MobileWebView] Clearing pending screenshot: ${key}`)
+                const pending = (executor as any).pendingActions.get(key)
+                if (pending) {
+                  clearTimeout(pending.timeout)
+                  pending.reject(new Error('Screenshot cancelled - recording started'))
+                  ;(executor as any).pendingActions.delete(key)
+                }
+              }
+            })
+          } catch (error) {
+            console.warn('⚠️ [MobileWebView] Failed to clear pending screenshots:', error)
+          }
+        }
+        clearPendingScreenshots()
+      }
+
+      prevRecordingModeRef.current = recordingMode
+    }, [recordingMode, device, targetAppBundleId])
+
+    /**
+     * Capture screenshot when recording stops (so UI updates with final state)
+     */
+    useEffect(() => {
+      if (prevRecordingModeRef.current && !recordingMode && connectionStatus === 'connected') {
+        console.log('📸 [MobileWebView] Recording stopped - capturing final screenshot')
+        setTimeout(() => {
+          captureScreenshot(true) // Force refresh
+        }, 500) // Small delay to let SDK settle
+      }
+    }, [recordingMode, connectionStatus, captureScreenshot])
 
     /**
      * Handle recording mode - start/stop event listener
@@ -722,80 +757,16 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
 
       console.log('🎬 [MobileWebView] Starting OLD recording mode for device (no SDK):', device.name)
 
-      let listenerActive = false
+      // REMOVED IN PHASE 3: Legacy Appium-based recording via mobileEventListenerManager
+      // This functionality was replaced by SDK-native event recording via WebSocket
+      // For iOS: SDK sends events directly via WebSocket (see SDK event handler below)
+      // For Android: CDP provides event recording capabilities
 
-      // Start recording
-      const startRecordingListener = async () => {
-        try {
-          // Create event listener with callback
-          const listener = mobileEventListenerManager.createListener(
-            device,
-            (event: NewRecordedEvent) => {
-              console.log('🎬 [MobileWebView] Event captured:', event.gestureType, event.coordinates)
+      console.log('🎬 [MobileWebView] Legacy Appium recording removed in Phase 3')
+      console.log('🎬 [MobileWebView] Use SDK WebSocket events for iOS recording')
 
-              // Convert new event format to old format expected by ProjectView
-              const convertedEvent: RecordedEvent = {
-                type: event.gestureType === 'tap' ? 'tap' :
-                      event.gestureType === 'swipe' ? 'swipe' :
-                      event.gestureType === 'type' ? 'type' :
-                      event.gestureType === 'scroll' ? 'scroll' :
-                      event.gestureType === 'longPress' ? 'tap' : 'tap',
-                selector: event.element?.xpath || `coordinates:${event.coordinates.x},${event.coordinates.y}`,
-                value: event.value || '',
-                timestamp: event.timestamp,
-                elementText: event.element?.text || ''
-              }
-
-              // Pass to callback
-              if (onRecordEvent) {
-                onRecordEvent(convertedEvent)
-              }
-            },
-            {
-              captureScreenshots: false,
-              throttleDelay: 100,
-              includeSystemEvents: false
-            }
-          )
-
-          // Start listening (pass same callback)
-          await listener.start((event: NewRecordedEvent) => {
-            const convertedEvent: RecordedEvent = {
-              type: event.gestureType === 'tap' ? 'tap' :
-                    event.gestureType === 'swipe' ? 'swipe' :
-                    event.gestureType === 'type' ? 'type' :
-                    event.gestureType === 'scroll' ? 'scroll' :
-                    event.gestureType === 'longPress' ? 'tap' : 'tap',
-              selector: event.element?.xpath || `coordinates:${event.coordinates.x},${event.coordinates.y}`,
-              value: event.value || '',
-              timestamp: event.timestamp,
-              elementText: event.element?.text || ''
-            }
-
-            if (onRecordEvent) {
-              onRecordEvent(convertedEvent)
-            }
-          })
-
-          listenerActive = true
-          console.log('🎬 [MobileWebView] Recording listener started successfully')
-        } catch (err) {
-          console.error('🎬 [MobileWebView] Failed to start recording listener:', err)
-          if (onError) {
-            onError(err as Error)
-          }
-        }
-      }
-
-      startRecordingListener()
-
-      // Cleanup: stop recording when component unmounts or recording mode changes
-      return () => {
-        if (listenerActive && device) {
-          console.log('🎬 [MobileWebView] Stopping recording listener on cleanup')
-          mobileEventListenerManager.removeListener(device.id).catch(console.error)
-        }
-      }
+      // No cleanup needed
+      return () => {}
     }, [device, connectionStatus, recordingMode])  // Removed onRecordEvent and onError from deps to prevent loop
 
     /**
@@ -820,44 +791,20 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
       console.log(`📱 [MobileWebView] Click at logical coordinates (${deviceX}, ${deviceY})`)
       console.log(`📱 [MobileWebView] Device logical resolution: ${device.capabilities.screenWidth}x${device.capabilities.screenHeight}`)
       console.log(`📱 [MobileWebView] Image display size: ${rect.width.toFixed(1)}x${rect.height.toFixed(1)}`)
-      console.log(`📱 [MobileWebView] Screenshot pixel size: ${imageRef.current.naturalWidth}x${imageRef.current.naturalHeight}`)
       console.log(`📱 [MobileWebView] Using logical scale: ${logicalScaleX.toFixed(2)}x, ${logicalScaleY.toFixed(2)}y`)
 
-      try {
-        setIsMatchingElement(true)
+      // REMOVED IN PHASE 3: Legacy Appium-based screenshot recording
+      // This was the screenshotRecorderManager that used Appium page source
+      // Replacement: SDK provides real-time element info via WebSocket events
 
-        // Get or create screenshot recorder
-        const recorder = screenshotRecorderManager.getRecorder(device.id) ||
-          screenshotRecorderManager.createRecorder(device, (event) => {
-            console.log('📸 [MobileWebView] Event recorded:', event)
-            // Convert to legacy format
-            if (onRecordEvent) {
-              const legacyEvent: RecordedEvent = {
-                type: event.gestureType as any,
-                selector: event.element?.xpath || event.element?.accessibilityId || '',
-                value: event.value,
-                timestamp: event.timestamp,
-                elementText: event.element?.text
-              }
-              onRecordEvent(legacyEvent)
-            }
-          })
+      console.error('📱 [MobileWebView] Screenshot-based recording removed in Phase 3')
+      console.error('📱 [MobileWebView] Use SDK WebSocket events for element detection')
 
-        // Ensure recorder is started
-        if (!recorder.isActive()) {
-          await recorder.start()
-        }
-
-        // Match click to element on-demand
-        await recorder.matchClickToElement(deviceX, deviceY, 'tap')
-
-      } catch (error: any) {
-        console.error('📱 [MobileWebView] Error matching element:', error)
-        // Show error to user (you can add a toast notification here)
-        alert(`Failed to find element: ${error.message}`)
-      } finally {
+      setIsMatchingElement(true)
+      setTimeout(() => {
         setIsMatchingElement(false)
-      }
+        alert('Legacy screenshot recording removed. Use SDK mode for iOS native apps.')
+      }, 500)
     }, [recordingMode, device, onRecordEvent])
 
     return (
@@ -1007,7 +954,7 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
               <Loader size={48} className="text-blue-400 animate-spin mx-auto mb-4" />
               <div className="text-white text-lg font-medium mb-2">Connecting to device...</div>
               <div className="text-gray-400 text-sm">
-                {device.os === 'android' ? 'Establishing CDP connection' : 'Connecting via Appium'}
+                {device.os === 'android' ? 'Establishing CDP connection' : 'Connecting via SDK'}
               </div>
             </div>
           )}
@@ -1101,7 +1048,7 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
                 Screen: {device.capabilities.screenWidth} x {device.capabilities.screenHeight}
               </div>
               <div>
-                {device.os === 'android' ? 'Chrome DevTools Protocol' : 'Appium + XCUITest'}
+                {device.os === 'android' ? 'Chrome DevTools Protocol' : 'SnapTest SDK'}
               </div>
             </div>
           </div>

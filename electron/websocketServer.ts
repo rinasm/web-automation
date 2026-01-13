@@ -150,6 +150,7 @@ export class SnapTestWebSocketServer {
   private wss: WebSocketServer | null = null
   private mainWindow: BrowserWindow | null = null
   private connectedClients: Map<WebSocket, DeviceInfo> = new Map()
+  private clientIPs: Map<WebSocket, string> = new Map() // Track client IP addresses
   private bonjourInstance: any = null
   private bonjourService: any = null
   private currentIP: string = ''
@@ -176,6 +177,13 @@ export class SnapTestWebSocketServer {
       const clientIP = req.socket.remoteAddress
       console.log(`🔵 [WebSocket Server] New connection from ${clientIP}`)
 
+      // Store client IP for device ID matching
+      if (clientIP) {
+        // Clean up IPv6 prefix if present (::ffff:192.168.1.1 -> 192.168.1.1)
+        const cleanIP = clientIP.replace('::ffff:', '')
+        this.clientIPs.set(ws, cleanIP)
+      }
+
       this.handleConnection(ws)
     })
 
@@ -200,6 +208,7 @@ export class SnapTestWebSocketServer {
         ws.close()
       })
       this.connectedClients.clear()
+      this.clientIPs.clear() // Clean up IP tracking
 
       this.wss.close(() => {
         console.log('🔴 [WebSocket Server] Stopped')
@@ -361,20 +370,26 @@ export class SnapTestWebSocketServer {
     ws.on('message', (data: Buffer) => {
       try {
         const rawString = data.toString()
-
-        // 🔍 LOG COMPLETE RAW MESSAGE (unfiltered!)
-        console.log('🔍 [WebSocket Server] ===== RAW MESSAGE START =====')
-        console.log(rawString)
-        console.log('🔍 [WebSocket Server] ===== RAW MESSAGE END =====')
-
         const message = JSON.parse(rawString)
 
-        // Also log parsed object structure
-        console.log('🔍 [WebSocket Server] Parsed message keys:', Object.keys(message))
-        if (message.element) {
-          console.log('🔍 [WebSocket Server] Element keys:', Object.keys(message.element))
-          console.log('🔍 [WebSocket Server] Has hierarchy?', !!message.element.hierarchy)
-          console.log('🔍 [WebSocket Server] Hierarchy length:', message.element.hierarchy?.length || 0)
+        // 🔍 SMART LOGGING: Filter out screenshot data to prevent memory leak
+        // Screenshots can be 800+ lines of base64 data and cause heap exhaustion
+        if (message.type === 'screenshotResponse') {
+          console.log('🔍 [WebSocket Server] Received message: screenshotResponse')
+          console.log('🔍 [WebSocket Server] Screenshot data size:', message.image?.length || 0, 'characters')
+          console.log('🔍 [WebSocket Server] Success:', message.success)
+        } else {
+          // Log full message for non-screenshot events
+          console.log('🔍 [WebSocket Server] ===== RAW MESSAGE START =====')
+          console.log(rawString)
+          console.log('🔍 [WebSocket Server] ===== RAW MESSAGE END =====')
+
+          console.log('🔍 [WebSocket Server] Parsed message keys:', Object.keys(message))
+          if (message.element) {
+            console.log('🔍 [WebSocket Server] Element keys:', Object.keys(message.element))
+            console.log('🔍 [WebSocket Server] Has hierarchy?', !!message.element.hierarchy)
+            console.log('🔍 [WebSocket Server] Hierarchy length:', message.element.hierarchy?.length || 0)
+          }
         }
 
         this.handleMessage(ws, message)
@@ -389,6 +404,7 @@ export class SnapTestWebSocketServer {
       console.log(`🔴 [WebSocket Server] Client disconnected: ${deviceInfo?.deviceName || 'unknown'}`)
 
       this.connectedClients.delete(ws)
+      this.clientIPs.delete(ws) // Clean up IP tracking
       this.notifyRenderer('sdk-disconnected', { device: deviceInfo })
     })
 
@@ -438,23 +454,33 @@ export class SnapTestWebSocketServer {
         this.handleNetworkEvent(ws, message as NetworkEvent)
         break
 
+      case 'screenshotResponse':
+        this.handleScreenshotResponse(ws, message)
+        break
+
       default:
         console.warn(`⚠️ [WebSocket Server] Unknown event type: ${message.type}`)
     }
   }
 
   private handleHandshake(ws: WebSocket, handshake: HandshakeEvent) {
+    const clientIP = this.clientIPs.get(ws)
+
     const deviceInfo: DeviceInfo = {
       deviceName: handshake.deviceName,
       deviceModel: handshake.deviceModel,
       systemVersion: handshake.systemVersion,
       bundleId: handshake.bundleId,
-      connectedAt: Date.now()
+      connectedAt: Date.now(),
+      ipAddress: clientIP // Store IP address for ios-wifi-XXX device ID matching
     }
 
     this.connectedClients.set(ws, deviceInfo)
 
     console.log(`🤝 [WebSocket Server] Handshake completed:`, deviceInfo)
+    if (clientIP) {
+      console.log(`🌐 [WebSocket Server] Device IP: ${clientIP} -> will match ios-wifi-${clientIP.replace(/\./g, '-')}`)
+    }
 
     // Notify renderer
     this.notifyRenderer('sdk-connected', { device: deviceInfo })
@@ -580,6 +606,29 @@ export class SnapTestWebSocketServer {
     })
   }
 
+  private handleScreenshotResponse(ws: WebSocket, message: any) {
+    const deviceInfo = this.connectedClients.get(ws)
+
+    if (!deviceInfo) {
+      console.warn('⚠️ [WebSocket Server] Screenshot response from unknown device')
+      return
+    }
+
+    console.log(`📸 [WebSocket Server] Screenshot response received: success=${message.success}, imageSize=${message.image?.length || 0} chars`)
+    console.log(`📸 [WebSocket Server] Forwarding to renderer for device: ${deviceInfo.bundleId}`)
+
+    // Forward to renderer for sdkActionExecutor to handle
+    this.notifyRenderer('sdk-screenshot-result', {
+      deviceId: deviceInfo.bundleId,
+      result: {
+        success: message.success,
+        image: message.image,
+        format: message.format,
+        error: message.error
+      }
+    })
+  }
+
   private handleExecutionLog(ws: WebSocket, message: ExecutionLogEvent) {
     const deviceInfo = this.connectedClients.get(ws)
 
@@ -682,14 +731,24 @@ export class SnapTestWebSocketServer {
     const udidMatch = deviceId.match(/(?:ios-usb-|android-)([A-F0-9-]+)/i)
     const extractedUdid = udidMatch ? udidMatch[1] : null
 
-    // Find client with matching device ID, bundleId, deviceName, or UDID
+    // Extract IP from ios-wifi-XXX format (e.g., ios-wifi-192-168-1-100 -> 192.168.1.100)
+    const wifiMatch = deviceId.match(/^ios-wifi-(.+)$/)
+    const wifiIP = wifiMatch ? wifiMatch[1].replace(/-/g, '.') : null
+
+    // Find client with matching device ID, bundleId, deviceName, UDID, or IP address
     for (const [ws, deviceInfo] of this.connectedClients.entries()) {
+      const ipMatch = wifiIP && deviceInfo.ipAddress === wifiIP
+
       if (
         deviceInfo.bundleId === deviceId ||
         deviceInfo.deviceName === deviceId ||
-        (extractedUdid && deviceInfo.bundleId.includes(extractedUdid))
+        (extractedUdid && deviceInfo.bundleId.includes(extractedUdid)) ||
+        ipMatch // Match ios-wifi-XXX device IDs by IP address
       ) {
         console.log(`✅ [WebSocket Server] Found matching device: ${deviceInfo.deviceName} (${deviceInfo.bundleId})`)
+        if (ipMatch) {
+          console.log(`✅ [WebSocket Server] Matched by IP address: ${deviceInfo.ipAddress}`)
+        }
         console.log(`📤 [WebSocket Server] Sending to SDK:`, JSON.stringify(message))
         this.sendJSON(ws, message)
         return true
@@ -697,7 +756,7 @@ export class SnapTestWebSocketServer {
     }
 
     console.warn(`⚠️ [WebSocket Server] Device not found: ${deviceId}`)
-    console.warn(`⚠️ [WebSocket Server] Connected devices:`, Array.from(this.connectedClients.values()).map(d => `${d.deviceName} (${d.bundleId})`))
+    console.warn(`⚠️ [WebSocket Server] Connected devices:`, Array.from(this.connectedClients.values()).map(d => `${d.deviceName} (${d.bundleId}) [IP: ${d.ipAddress || 'unknown'}]`))
     return false
   }
 
@@ -720,6 +779,7 @@ interface DeviceInfo {
   systemVersion: string
   bundleId: string
   connectedAt: number
+  ipAddress?: string // Client IP address for matching ios-wifi-XXX device IDs
 }
 
 // Singleton instance
