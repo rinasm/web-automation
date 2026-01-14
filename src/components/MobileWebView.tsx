@@ -98,12 +98,25 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
         } else {
           // iOS: Connection handled by SDK WebSocket (no Appium needed)
           console.log('📱 [MobileWebView] iOS device - using SDK WebSocket connection')
-          console.log('📱 [MobileWebView] Waiting for SDK to connect via WebSocket...')
 
-          // For iOS native apps, connection is established via SDK WebSocket
-          // Wait for SDK connection event before setting status to 'connected'
-          setConnectionStatus('connecting')
-          console.log('📱 [MobileWebView] iOS waiting for SDK connection event')
+          // Check if SDK is already connected (device.status === 'connected' means SDK WebSocket is active)
+          if (device.status === 'connected') {
+            console.log('📱 [MobileWebView] SDK already connected! Setting status immediately.')
+            setConnectionStatus('connected')
+            setSdkConnected(true)
+            // Use device info from store to populate SDK device state
+            setSdkDevice({
+              deviceName: device.name,
+              systemVersion: device.osVersion,
+              bundleId: device.udid, // udid contains bundleId for SDK devices
+              ipAddress: device.ip
+            })
+            console.log('📱 [MobileWebView] SDK device info set from store:', device.name)
+          } else {
+            // SDK not connected yet - wait for connection event
+            console.log('📱 [MobileWebView] SDK not connected yet - waiting for connection event...')
+            setConnectionStatus('connecting')
+          }
 
           // Note: Flow extractor not applicable for native iOS apps
           // SDK handles all actions directly via WebSocket commands
@@ -540,9 +553,10 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
 
     /**
      * Set up SDK WebSocket event listeners
+     * NOTE: This effect only runs ONCE on mount to avoid removing/re-adding listeners
      */
     useEffect(() => {
-      console.log('📱 [MobileWebView] Setting up SDK event listeners')
+      console.log('📱 [MobileWebView] Setting up SDK event listeners (once)')
 
       // Listen for SDK connections
       window.electronAPI.onSDKConnected((device) => {
@@ -557,14 +571,42 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
         console.log('📱 [SDK] Device disconnected:', device)
         setSdkConnected(false)
         setSdkDevice(null)
+        setConnectionStatus('disconnected') // Update UI to show disconnected state
+        setScreenshot(null) // Clear the screenshot
+      })
+
+      // Listen for automatic SDK screenshots (no polling needed!)
+      window.electronAPI.onSDKScreenshotResult((data: any) => {
+        console.log('📸 [MobileWebView] SDK screenshot event received!')
+        console.log('📸 [MobileWebView] data.deviceId:', data.deviceId)
+        console.log('📸 [MobileWebView] device.udid:', device.udid)
+        console.log('📸 [MobileWebView] sdkDevice?.bundleId:', sdkDevice?.bundleId)
+        console.log('📸 [MobileWebView] Match check:', data.deviceId === device.udid || data.deviceId === sdkDevice?.bundleId)
+
+        if (data.deviceId === device.udid || data.deviceId === sdkDevice?.bundleId) {
+          console.log('✅ [MobileWebView] Device ID matched! Processing screenshot...')
+          if (data.result.success && data.result.image) {
+            console.log('✅ [MobileWebView] Setting screenshot (image size:', data.result.image.length, 'chars)')
+            setScreenshot(data.result.image)
+          } else {
+            console.warn('⚠️ [MobileWebView] SDK screenshot failed:', data.result.error)
+          }
+        } else {
+          console.warn('⚠️ [MobileWebView] Device ID mismatch - screenshot ignored')
+        }
       })
 
       // Listen for SDK events
       window.electronAPI.onSDKEvent(async (data) => {
         console.log('📱 [SDK] Event received:', data.event)
 
+        // Get current recording state from the store (not from closure)
+        const currentRecordingState = useRecordingStore.getState().status === 'recording'
+        console.log('📱 [SDK] Recording mode active?', currentRecordingState)
+
         // Forward SDK events to recording store if recording
-        if (recordingMode) {
+        if (currentRecordingState) {
+          console.log('✅ [SDK] Recording mode is TRUE - processing event for recording')
           let enrichedEvent = { ...data.event }
 
           // DEBUG: Log element object structure
@@ -605,7 +647,13 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
             console.log('⚠️  [Fallback] Ensure SDK sends viewHierarchyDebugDescription for all events')
           }
 
-          addSDKEvent(enrichedEvent)
+          console.log('📝 [SDK] Adding event to recording store:', enrichedEvent)
+          // Get the addSDKEvent function from the store directly
+          const { addSDKEvent: addEvent } = useRecordingStore.getState()
+          addEvent(enrichedEvent)
+          console.log('✅ [SDK] Event added to store successfully')
+        } else {
+          console.warn('⚠️ [SDK] Recording mode is FALSE - event NOT captured')
         }
       })
 
@@ -613,7 +661,7 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
       return () => {
         window.electronAPI.removeSDKListeners()
       }
-    }, [recordingMode, addSDKEvent])
+    }, [])  // Empty dependency array - only run once on mount
 
     /**
      * Expose methods via ref
@@ -674,24 +722,37 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
     /**
      * Auto-refresh screenshot (balanced polling for smooth mirroring without performance impact)
      * Pauses when matching elements or recording to avoid SDK resource contention
+     * IMPORTANT: Both iOS (SDK) and Android (CDP) use request/response pattern
      */
     useEffect(() => {
-      if (connectionStatus === 'connected' && !isLoading && !isMatchingElement && !recordingMode) {
-        console.log('📸 [MobileWebView] Starting screenshot polling (1 FPS)')
-        const interval = setInterval(() => {
-          captureScreenshot()
-        }, 1000) // 1000ms polling = 1 FPS (smooth mirroring without memory issues)
-
-        return () => {
-          console.log('📸 [MobileWebView] Stopping screenshot polling')
-          clearInterval(interval)
-        }
-      } else {
+      // Skip polling if not connected or busy
+      if (connectionStatus !== 'connected' || isLoading || isMatchingElement || recordingMode) {
         if (recordingMode) {
           console.log('📸 [MobileWebView] Screenshot polling paused - recording active')
         }
+        return
       }
-    }, [connectionStatus, isLoading, isMatchingElement, recordingMode, captureScreenshot])
+
+      // For iOS, wait for SDK connection before polling
+      if (device.os === 'ios' && !sdkConnected) {
+        console.log('📸 [MobileWebView] iOS device - waiting for SDK connection before polling')
+        return
+      }
+
+      // Start polling for both iOS (SDK) and Android (CDP)
+      // IMPORTANT: Both use request/response pattern, not push-based
+      const deviceType = device.os === 'ios' ? 'iOS (SDK)' : 'Android (CDP)'
+      console.log(`📸 [MobileWebView] Starting screenshot polling (1 FPS) for ${deviceType}`)
+
+      const interval = setInterval(() => {
+        captureScreenshot()
+      }, 1000) // 1000ms polling = 1 FPS (smooth mirroring without memory issues)
+
+      return () => {
+        console.log('📸 [MobileWebView] Stopping screenshot polling')
+        clearInterval(interval)
+      }
+    }, [connectionStatus, isLoading, isMatchingElement, recordingMode, captureScreenshot, device.os, sdkConnected])
 
     /**
      * Cancel pending screenshots when recording starts
@@ -984,7 +1045,7 @@ const MobileWebView = forwardRef<MobileWebViewRef, MobileWebViewProps>(
                     <div className="bg-black rounded-2xl overflow-hidden relative">
                       <img
                         ref={imageRef}
-                        src={screenshot}
+                        src={screenshot?.startsWith('data:') ? screenshot : `data:image/png;base64,${screenshot}`}
                         alt="Device screen"
                         className="w-full h-full object-contain"
                         style={{

@@ -38,6 +38,10 @@ interface MobileDeviceState {
   // Helpers
   getCurrentDevice: () => MobileDevice | undefined
   getConnectedDevices: () => MobileDevice[]
+
+  // Initialization
+  resetAllDeviceStatuses: () => void
+  removeOldIPBasedDevices: () => void
 }
 
 export const useMobileDeviceStore = create<MobileDeviceState>()(
@@ -59,10 +63,13 @@ export const useMobileDeviceStore = create<MobileDeviceState>()(
 
       // Device management
       addDevice: (device: MobileDevice) => {
-        console.log(`📱 [MOBILE STORE] Adding device:`, device.name)
+        console.log(`📱 [MOBILE STORE] Adding device: ${device.name} (ID: ${device.id})`)
+        console.log(`📱 [MOBILE STORE] Current device count: ${get().devices.length}`)
         set((state) => ({
           devices: [...state.devices.filter(d => d.id !== device.id), device]
         }))
+        console.log(`📱 [MOBILE STORE] New device count: ${get().devices.length}`)
+        console.log(`📱 [MOBILE STORE] All device IDs:`, get().devices.map(d => d.id))
       },
 
       removeDevice: (deviceId: string) => {
@@ -148,6 +155,49 @@ export const useMobileDeviceStore = create<MobileDeviceState>()(
 
       getConnectedDevices: () => {
         return get().devices.filter(d => d.status === 'connected')
+      },
+
+      // Initialization
+      resetAllDeviceStatuses: () => {
+        console.log('🔄 [MOBILE STORE] Resetting all device statuses to disconnected (app startup)')
+        set((state) => ({
+          devices: state.devices.map(d => ({
+            ...d,
+            status: 'disconnected'
+          }))
+        }))
+      },
+
+      // Migration: Remove old IP-based device IDs (cleanup from old format)
+      removeOldIPBasedDevices: () => {
+        const state = get()
+        console.log('🧹 [MOBILE STORE] Running migration to remove old IP-based device IDs')
+        console.log(`📊 [MOBILE STORE] Current devices before migration:`, state.devices.map(d => `${d.id} (${d.name})`))
+
+        // Old format: ios-wifi-192-168-50-99 (IP-based)
+        // New format: ios-wifi-iphone (hostname-based)
+        const oldIPBasedPattern = /^ios-wifi-\d+-\d+-\d+-\d+$/
+        const cleanedDevices = state.devices.filter(d => {
+          const isOldFormat = oldIPBasedPattern.test(d.id)
+          if (isOldFormat) {
+            console.log(`   🗑️ Removing old IP-based device: ${d.id} (${d.name})`)
+            return false
+          }
+          return true
+        })
+
+        const removedCount = state.devices.length - cleanedDevices.length
+        if (removedCount > 0) {
+          console.log(`✅ [MOBILE STORE] Removed ${removedCount} old IP-based device(s)`)
+          set({
+            devices: cleanedDevices,
+            currentDeviceId: oldIPBasedPattern.test(state.currentDeviceId || '') ? null : state.currentDeviceId
+          })
+        } else {
+          console.log(`✅ [MOBILE STORE] No old IP-based devices found, migration skipped`)
+        }
+
+        console.log(`📊 [MOBILE STORE] Devices after migration:`, get().devices.map(d => `${d.id} (${d.name})`))
       }
     }),
     {

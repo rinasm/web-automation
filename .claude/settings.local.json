@@ -12,7 +12,17 @@
       "Bash(xcrun devicectl device process launch --device 00008110-001E38A834C3801E com.rinasmusthafa.MyTodoApp)",
       "Bash(awk '{print $2}')",
       "Bash(xcodebuild -project MyTodoApp.xcodeproj -scheme MyTodoApp -configuration Debug -destination 'platform=iOS,id=00008110-001E38A834C3801E' build)",
-      "Bash(pkill -f \"npm run dev\")"
+      "Bash(pkill -f \"npm run dev\")",
+      "Bash(pkill -9 -f \"electron\")",
+      "Bash(lsof -ti:8080)",
+      "Bash(xargs kill -9)",
+      "Bash(pkill -9 -f \"npm run dev|electron|vite\")",
+      "Bash(lsof -ti:5173)",
+      "Bash(arp -a)",
+      "Bash(/opt/homebrew/bin/idevice_id -l)",
+      "Bash(xcodebuild -project MyTodoApp.xcodeproj -scheme MyTodoApp -configuration Debug -destination 'platform=iOS,id=00008110-001E38A834C3801E' -derivedDataPath ./build)",
+      "Bash(xcrun devicectl device install app --device 00008110-001E38A834C3801E \"/Users/rinasmusthafa/works/IOS/MyTodoApp/build/Build/Products/Debug-iphoneos/MyTodoApp.app\")",
+      "Bash(xcodebuild -project MyTodoApp.xcodeproj -scheme MyTodoApp -configuration Debug -destination 'platform=iOS,id=00008110-001E38A834C3801E' -derivedDataPath ./build clean build)"
     ],
     "deny": [],
     "ask": []

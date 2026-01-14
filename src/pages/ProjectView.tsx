@@ -75,6 +75,38 @@ function ProjectView() {
   const currentProject = projects.find(p => p.id === currentProjectId)
   const currentDevice = getCurrentDevice()
 
+  // Listen for SDK connection events
+  useEffect(() => {
+    console.log('📱 [ProjectView] Setting up SDK connection listeners')
+
+    // Listen for SDK connections
+    window.electronAPI.onSDKConnected((device: any) => {
+      console.log('🟢 [ProjectView] SDK connected:', device)
+      setSdkConnected(true)
+      setSdkDevice(device)
+    })
+
+    // Listen for SDK disconnections
+    window.electronAPI.onSDKDisconnected((device: any) => {
+      console.log('🔴 [ProjectView] SDK disconnected:', device)
+      setSdkConnected(false)
+      setSdkDevice(null)
+    })
+
+    // Check if already connected
+    window.electronAPI.invoke('mobile:get-connected-sdk-devices').then((devices: any[]) => {
+      if (devices.length > 0) {
+        console.log('✅ [ProjectView] Found connected SDK device:', devices[0])
+        setSdkConnected(true)
+        setSdkDevice(devices[0])
+      }
+    })
+
+    return () => {
+      // Cleanup not needed as listeners are global
+    }
+  }, [])
+
   const showToast = (message: string, type: ToastType = 'info') => {
     setToast({ message, type, show: true })
   }

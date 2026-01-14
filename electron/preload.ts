@@ -26,7 +26,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onSDKDisconnected: (callback: (device: any) => void) => {
     ipcRenderer.on('sdk:sdk-disconnected', (_event, data) => callback(data.device));
   },
-  onSDKEvent: (callback: (data: { device: any; event: any }) => void) => {
+  onSDKEvent: (callback: (data: any) => void) => {
     ipcRenderer.on('sdk:sdk-event', (_event, data) => callback(data));
   },
   onSDKServerStarted: (callback: (port: number) => void) => {
@@ -143,7 +143,7 @@ export interface ElectronAPI {
   // SDK WebSocket event listeners
   onSDKConnected: (callback: (device: any) => void) => void;
   onSDKDisconnected: (callback: (device: any) => void) => void;
-  onSDKEvent: (callback: (data: { device: any; event: any }) => void) => void;
+  onSDKEvent: (callback: (data: any) => void) => void;
   onSDKServerStarted: (callback: (port: number) => void) => void;
   onSDKServerError: (callback: (error: string) => void) => void;
   onSDKActionResult: (callback: (data: { deviceId: string; result: any }) => void) => void;

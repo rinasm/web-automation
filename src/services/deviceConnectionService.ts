@@ -365,7 +365,7 @@ class DeviceConnectionService {
       osVersion: '13.0',
       ip: '192.168.1.102',
       port: 5555,
-      status: 'connected',
+      status: 'disconnected',
       isEmulator: false,
       capabilities: {
         screenWidth: 1080,

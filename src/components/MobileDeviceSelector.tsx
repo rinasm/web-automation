@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Smartphone, ChevronDown, RefreshCw, Plus, Wifi, WifiOff, AlertCircle } from 'lucide-react'
 import { useMobileDeviceStore } from '../store/mobileDeviceStore'
 import { deviceConnectionService } from '../services/deviceConnectionService'
@@ -19,7 +19,9 @@ export const MobileDeviceSelector: React.FC<MobileDeviceSelectorProps> = ({
     isScanning,
     setScanning,
     addDevice,
-    updateDeviceStatus
+    updateDeviceStatus,
+    clearAllDevices,
+    removeDevice
   } = useMobileDeviceStore()
 
   const [isOpen, setIsOpen] = useState(false)
@@ -28,30 +30,111 @@ export const MobileDeviceSelector: React.FC<MobileDeviceSelectorProps> = ({
   const currentDevice = devices.find(d => d.id === currentDeviceId)
   const connectedDevices = devices.filter(d => d.status === 'connected')
 
+  // DEBUG: Log devices when component renders
+  useEffect(() => {
+    console.log('📱 [MobileDeviceSelector] Component rendered')
+    console.log('📱 [MobileDeviceSelector] Total devices:', devices.length)
+    console.log('📱 [MobileDeviceSelector] Devices:', devices.map(d => `${d.id} (${d.name}) - ${d.status}`))
+    console.log('📱 [MobileDeviceSelector] Current device ID:', currentDeviceId)
+  }, [devices, currentDeviceId])
+
+  // Listen for network changes that clear stale devices
+  useEffect(() => {
+    if (!window.electronAPI) return
+
+    const unsubscribe = window.electronAPI.onSDKEvent('devices-cleared', (data: any) => {
+      console.log('🧹 [DeviceSelector] Devices cleared due to:', data.reason)
+
+      // Remove all connected devices from the store
+      // This prevents stale devices from persisting in localStorage
+      devices.forEach(device => {
+        if (device.status === 'connected') {
+          console.log(`🗑️ [DeviceSelector] Removing device due to network change: ${device.id}`)
+          removeDevice(device.id)
+        }
+      })
+
+      // Show notification to user
+      console.log(`📱 [DeviceSelector] ${data.message}`)
+    })
+
+    return () => {
+      if (unsubscribe) unsubscribe()
+    }
+  }, [devices, updateDeviceStatus])
+
   const handleRefresh = async () => {
+    console.log('🔄 [DeviceSelector] Refreshing devices...')
     setIsRefreshing(true)
     setScanning(true)
 
     try {
-      const discoveredDevices = await deviceConnectionService.scanForDevices()
-      discoveredDevices.forEach(device => {
-        addDevice(device)
-      })
+      // Step 1: Clear all persisted devices (same as app startup)
+      console.log('🧹 [DeviceSelector] Clearing all persisted devices')
+      clearAllDevices()
+
+      // Step 2: Query for already-connected SDK devices (same as app startup)
+      if (window.electronAPI) {
+        const connectedDevices = await window.electronAPI.invoke('mobile:get-connected-sdk-devices')
+        console.log(`📱 [DeviceSelector] Found ${connectedDevices?.length || 0} already-connected SDK device(s)`)
+
+        if (connectedDevices && connectedDevices.length > 0) {
+          connectedDevices.forEach((device: any) => {
+            console.log(`✅ [DeviceSelector] Re-adding already-connected SDK device: ${device.deviceName}`)
+            const normalizedHostname = device.deviceName.toLowerCase().replace(/[^a-z0-9]/g, '-')
+            const deviceId = `ios-wifi-${normalizedHostname}`
+            const deviceData = {
+              id: deviceId,
+              name: device.deviceName,
+              os: 'ios' as const,
+              osVersion: device.systemVersion || 'Unknown',
+              ip: device.ipAddress || 'Unknown',
+              port: 8080,
+              status: 'connected' as const,
+              isEmulator: false,
+              capabilities: {
+                screenWidth: 1170,
+                screenHeight: 2532,
+                pixelRatio: 3,
+                userAgent: 'iOS App',
+                hasTouch: true,
+                supportsOrientation: true,
+                supportsGeolocation: false
+              },
+              udid: device.bundleId || normalizedHostname
+            }
+            addDevice(deviceData)
+          })
+        }
+      }
+
+      console.log('✅ [DeviceSelector] Refresh complete')
     } catch (error) {
-      console.error('Failed to scan for devices:', error)
+      console.error('❌ [DeviceSelector] Failed to refresh devices:', error)
     } finally {
       setIsRefreshing(false)
       setScanning(false)
     }
   }
 
-  const handleSelectDevice = (deviceId: string) => {
+  const handleSelectDevice = async (deviceId: string) => {
     const device = devices.find(d => d.id === deviceId)
     if (!device) return
 
+    // If selecting a different device, disconnect all others first
+    if (currentDeviceId && currentDeviceId !== deviceId) {
+      console.log('📱 [DeviceSelector] Disconnecting current device before switching')
+      // Remove all other connected devices (single connection mode)
+      const connectedDevices = devices.filter(d => d.status === 'connected' && d.id !== deviceId)
+      connectedDevices.forEach(d => {
+        console.log(`🗑️ [DeviceSelector] Removing other device: ${d.id}`)
+        removeDevice(d.id)
+      })
+    }
+
     // If device is not connected, try to connect
     if (device.status !== 'connected') {
-      connectDevice(device.id)
+      await connectDevice(device.id)
     } else {
       setCurrentDevice(deviceId)
     }
@@ -63,12 +146,23 @@ export const MobileDeviceSelector: React.FC<MobileDeviceSelectorProps> = ({
     const device = devices.find(d => d.id === deviceId)
     if (!device) return
 
+    // IMPORTANT: Remove ALL other devices before connecting (single connection mode)
+    const otherConnectedDevices = devices.filter(d => d.id !== deviceId && d.status === 'connected')
+    if (otherConnectedDevices.length > 0) {
+      console.log(`📱 [DeviceSelector] Removing ${otherConnectedDevices.length} other device(s) (single connection mode)`)
+      otherConnectedDevices.forEach(d => {
+        removeDevice(d.id)
+        console.log(`   🗑️ Removed: ${d.name}`)
+      })
+    }
+
     updateDeviceStatus(deviceId, 'connecting')
 
     try {
       const connection = await deviceConnectionService.connectToDevice(device)
       updateDeviceStatus(deviceId, 'connected')
       setCurrentDevice(deviceId)
+      console.log(`✅ [DeviceSelector] Connected to: ${device.name} (single connection)`)
     } catch (error) {
       console.error('Failed to connect to device:', error)
       updateDeviceStatus(deviceId, 'error')
@@ -139,7 +233,7 @@ export const MobileDeviceSelector: React.FC<MobileDeviceSelectorProps> = ({
             {/* Header */}
             <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
               <span className="text-sm font-semibold text-gray-700">
-                Mobile Devices
+                Mobile Devices ({devices.length})
               </span>
               <div className="flex items-center gap-2">
                 <button
@@ -228,11 +322,20 @@ export const MobileDeviceSelector: React.FC<MobileDeviceSelectorProps> = ({
             </div>
 
             {/* Footer */}
-            {connectedDevices.length > 0 && (
+            {devices.length > 0 && (
               <div className="px-4 py-2 bg-gray-50 border-t border-gray-200">
-                <p className="text-xs text-gray-600">
-                  {connectedDevices.length} device{connectedDevices.length > 1 ? 's' : ''} connected
-                </p>
+                {connectedDevices.length > 0 ? (
+                  <p className="text-xs text-gray-600">
+                    <span className="inline-flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+                      1 device connected (single connection mode)
+                    </span>
+                  </p>
+                ) : (
+                  <p className="text-xs text-gray-500">
+                    No devices connected
+                  </p>
+                )}
               </div>
             )}
           </div>

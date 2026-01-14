@@ -5,12 +5,68 @@ import { networkInterfaces } from 'os'
 import { parseViewHierarchy, findElementAtCoordinates } from './hierarchyElementFinder'
 
 /**
- * Get all local IP addresses for network interfaces
- * Returns all non-internal IPv4 addresses with their interface names
+ * Check if an interface name indicates a VPN/tunnel connection
+ * VPN interfaces are virtual tunnels, not physical network connections
  */
-function getAllLocalIPAddresses(): Array<{interface: string, address: string}> {
+function isVPNInterface(interfaceName: string): boolean {
+  const vpnPatterns = [
+    /^utun/i,      // macOS/iOS VPN tunnels (utun0, utun1, etc.)
+    /^tun/i,       // Generic tunnel interfaces (OpenVPN, WireGuard)
+    /^tap/i,       // TAP virtual network interfaces
+    /^ppp/i,       // Point-to-Point Protocol (legacy VPN)
+    /^ipsec/i,     // IPsec VPN interfaces
+    /^wg/i,        // WireGuard VPN (wg0, wg1, etc.)
+    /^vpn/i,       // Generic VPN naming
+    /^tun\d+$/i,   // Linux tunnel interfaces
+    /^tailscale/i, // Tailscale VPN
+    /^zt/i,        // ZeroTier VPN
+    /^veth/i,      // Docker/container virtual ethernet
+    /^docker/i,    // Docker bridge interfaces
+    /^br-/i,       // Linux bridge interfaces (Docker, libvirt)
+    /^virbr/i,     // Virtual machine bridges (libvirt)
+  ]
+
+  return vpnPatterns.some(pattern => pattern.test(interfaceName))
+}
+
+/**
+ * Determine the type of network interface
+ */
+function getInterfaceType(interfaceName: string): 'hotspot' | 'wifi' | 'ethernet' | 'vpn' | 'virtual' | 'other' {
+  if (isVPNInterface(interfaceName)) {
+    return 'vpn'
+  }
+
+  // iPhone hotspot (macOS creates bridge interfaces)
+  if (interfaceName.startsWith('bridge')) {
+    return 'hotspot'
+  }
+
+  // WiFi interfaces
+  if (interfaceName === 'en0' || interfaceName === 'wlan0' || interfaceName.match(/^wl/)) {
+    return 'wifi'
+  }
+
+  // Ethernet interfaces
+  if (interfaceName === 'en1' || interfaceName === 'eth0' || interfaceName.match(/^eth\d+$/)) {
+    return 'ethernet'
+  }
+
+  // Virtual/loopback (should already be filtered by internal flag)
+  if (interfaceName === 'lo' || interfaceName === 'lo0') {
+    return 'virtual'
+  }
+
+  return 'other'
+}
+
+/**
+ * Get all local IP addresses for network interfaces
+ * Returns all non-internal IPv4 addresses with their interface names and types
+ */
+function getAllLocalIPAddresses(): Array<{interface: string, address: string, type: string}> {
   const nets = networkInterfaces()
-  const addresses: Array<{interface: string, address: string}> = []
+  const addresses: Array<{interface: string, address: string, type: string}> = []
 
   for (const name of Object.keys(nets)) {
     const interfaces = nets[name]
@@ -19,7 +75,8 @@ function getAllLocalIPAddresses(): Array<{interface: string, address: string}> {
     for (const net of interfaces) {
       // Skip internal (i.e. 127.0.0.1) and non-IPv4 addresses
       if (net.family === 'IPv4' && !net.internal) {
-        addresses.push({ interface: name, address: net.address })
+        const type = getInterfaceType(name)
+        addresses.push({ interface: name, address: net.address, type })
       }
     }
   }
@@ -29,34 +86,66 @@ function getAllLocalIPAddresses(): Array<{interface: string, address: string}> {
 
 /**
  * Get primary local IP address for display
- * Prioritizes: iPhone hotspot (bridge*) > WiFi (en0) > Other interfaces
+ * Filters out VPN/tunnel interfaces to ensure local network connectivity
+ * Priority: iPhone hotspot (bridge*) > WiFi (en0/wlan0) > Ethernet > Other physical interfaces
  */
 function getLocalIPAddress(): string {
   const allAddresses = getAllLocalIPAddresses()
 
-  if (allAddresses.length === 0) {
-    console.warn('⚠️ [Network] No network interfaces found, falling back to localhost')
+  // Log all detected interfaces for debugging
+  console.log(`🔍 [Network] Detected ${allAddresses.length} network interface(s):`)
+  allAddresses.forEach(addr => {
+    const typeEmoji = {
+      'hotspot': '📱',
+      'wifi': '📶',
+      'ethernet': '🔌',
+      'vpn': '🔒',
+      'virtual': '💻',
+      'other': '❓'
+    }[addr.type] || '❓'
+    console.log(`   ${typeEmoji} ${addr.interface} (${addr.type}): ${addr.address}`)
+  })
+
+  // Filter out VPN and virtual interfaces for local network communication
+  const physicalAddresses = allAddresses.filter(addr => addr.type !== 'vpn' && addr.type !== 'virtual')
+
+  if (physicalAddresses.length === 0) {
+    console.warn('⚠️ [Network] No physical network interfaces found (only VPN/virtual)')
+    console.warn('⚠️ [Network] This may prevent device connections. Consider disconnecting VPN or using WiFi.')
+    if (allAddresses.length > 0) {
+      // Fallback to first available address (even if VPN)
+      const fallback = allAddresses[0]
+      console.warn(`⚠️ [Network] Falling back to ${fallback.interface} (${fallback.type}): ${fallback.address}`)
+      return fallback.address
+    }
     return '127.0.0.1'
   }
 
-  // Prioritize iPhone hotspot (bridge interfaces)
-  const hotspotInterface = allAddresses.find(addr => addr.interface.startsWith('bridge'))
+  // Prioritize iPhone hotspot (bridge interfaces) - best for iPhone testing
+  const hotspotInterface = physicalAddresses.find(addr => addr.type === 'hotspot')
   if (hotspotInterface) {
-    console.log(`🌐 [Network] Found iPhone Hotspot interface ${hotspotInterface.interface}: ${hotspotInterface.address}`)
+    console.log(`✅ [Network] Using iPhone Hotspot: ${hotspotInterface.interface} → ${hotspotInterface.address}`)
     return hotspotInterface.address
   }
 
-  // Then WiFi interface (en0 on macOS, wlan0 on Linux)
-  const wifiInterface = allAddresses.find(addr => addr.interface === 'en0' || addr.interface === 'wlan0')
+  // Then WiFi interface (most common for local testing)
+  const wifiInterface = physicalAddresses.find(addr => addr.type === 'wifi')
   if (wifiInterface) {
-    console.log(`🌐 [Network] Found WiFi interface ${wifiInterface.interface}: ${wifiInterface.address}`)
+    console.log(`✅ [Network] Using WiFi: ${wifiInterface.interface} → ${wifiInterface.address}`)
     return wifiInterface.address
   }
 
-  // Return first available address
-  const firstAddress = allAddresses[0]
-  console.log(`🌐 [Network] Using interface ${firstAddress.interface}: ${firstAddress.address}`)
-  return firstAddress.address
+  // Then Ethernet (also good for local network)
+  const ethernetInterface = physicalAddresses.find(addr => addr.type === 'ethernet')
+  if (ethernetInterface) {
+    console.log(`✅ [Network] Using Ethernet: ${ethernetInterface.interface} → ${ethernetInterface.address}`)
+    return ethernetInterface.address
+  }
+
+  // Fallback to first physical interface
+  const firstPhysical = physicalAddresses[0]
+  console.log(`✅ [Network] Using interface: ${firstPhysical.interface} (${firstPhysical.type}) → ${firstPhysical.address}`)
+  return firstPhysical.address
 }
 
 // Types for SDK events
@@ -154,6 +243,7 @@ export class SnapTestWebSocketServer {
   private bonjourInstance: any = null
   private bonjourService: any = null
   private currentIP: string = ''
+  private networkCheckInterval: NodeJS.Timeout | null = null
 
   constructor(private port: number = 8080) {}
 
@@ -191,6 +281,9 @@ export class SnapTestWebSocketServer {
       console.error('❌ [WebSocket Server] Error:', error)
       this.notifyRenderer('server-error', { error: error.message })
     })
+
+    // Start network change detection
+    this.startNetworkMonitoring()
   }
 
   /**
@@ -199,6 +292,9 @@ export class SnapTestWebSocketServer {
   stop() {
     if (this.wss) {
       console.log('🔴 [WebSocket Server] Stopping...')
+
+      // Stop network monitoring
+      this.stopNetworkMonitoring()
 
       // Stop Bonjour service
       this.stopBonjourService()
@@ -260,6 +356,76 @@ export class SnapTestWebSocketServer {
     this.announceServerAddresses()
   }
 
+  /**
+   * Start monitoring for network changes
+   * Checks every 30 seconds if the IP address has changed
+   */
+  private startNetworkMonitoring() {
+    console.log('🔍 [Network] Starting network change detection...')
+
+    // Check for network changes every 30 seconds
+    this.networkCheckInterval = setInterval(() => {
+      const newIP = getLocalIPAddress()
+
+      if (newIP !== this.currentIP) {
+        console.log(`🔄 [Network] Network change detected: ${this.currentIP} → ${newIP}`)
+
+        // Clear stale device connections (they may not be reachable on new network)
+        this.clearStaleConnections()
+
+        // Announce new network addresses
+        this.announceServerAddresses()
+      }
+    }, 30000) // Check every 30 seconds
+  }
+
+  /**
+   * Stop monitoring for network changes
+   */
+  private stopNetworkMonitoring() {
+    if (this.networkCheckInterval) {
+      clearInterval(this.networkCheckInterval)
+      this.networkCheckInterval = null
+      console.log('🔍 [Network] Network change detection stopped')
+    }
+  }
+
+  /**
+   * Clear stale device connections
+   * Called when network changes, as devices may no longer be reachable
+   */
+  private clearStaleConnections() {
+    const deviceCount = this.connectedClients.size
+
+    if (deviceCount === 0) {
+      return
+    }
+
+    console.log(`🧹 [Network] Clearing ${deviceCount} stale device connection(s) due to network change...`)
+
+    // Close all WebSocket connections
+    this.connectedClients.forEach((deviceInfo, ws) => {
+      console.log(`   ❌ Disconnecting: ${deviceInfo.deviceName} (${deviceInfo.bundleId})`)
+      try {
+        ws.close(1001, 'Network changed') // 1001 = Going Away
+      } catch (error) {
+        console.error(`   ⚠️  Failed to close connection for ${deviceInfo.deviceName}:`, error)
+      }
+    })
+
+    // Clear the maps
+    this.connectedClients.clear()
+    this.clientIPs.clear()
+
+    // Notify renderer to update UI
+    this.notifyRenderer('devices-cleared', {
+      reason: 'network-change',
+      message: 'Network changed - cleared stale device connections'
+    })
+
+    console.log('🧹 [Network] Stale connections cleared')
+  }
+
   // ==================== Private Methods ====================
 
   /**
@@ -280,14 +446,35 @@ export class SnapTestWebSocketServer {
 
     console.log(`🟢 [WebSocket Server] Listening on ws://0.0.0.0:${this.port}`)
     console.log(`🟢 [WebSocket Server] Available connection addresses:`)
-    allAddresses.forEach(addr => {
+
+    // Separate physical and VPN interfaces for clearer display
+    const physicalAddresses = allAddresses.filter(addr => addr.type !== 'vpn' && addr.type !== 'virtual')
+    const vpnAddresses = allAddresses.filter(addr => addr.type === 'vpn' || addr.type === 'virtual')
+
+    // Show physical interfaces first (these are the ones that should be used)
+    physicalAddresses.forEach(addr => {
       const isPrimary = addr.address === primaryIP
       const marker = isPrimary ? '⭐' : '  '
-      console.log(`${marker}   ws://${addr.address}:${this.port} (${addr.interface})`)
+      const typeEmoji = {
+        'hotspot': '📱',
+        'wifi': '📶',
+        'ethernet': '🔌',
+        'other': '🌐'
+      }[addr.type] || '🌐'
+      console.log(`${marker} ${typeEmoji} ws://${addr.address}:${this.port} (${addr.interface} - ${addr.type})`)
     })
 
-    if (allAddresses.some(addr => addr.interface.startsWith('bridge'))) {
-      console.log(`📱 [WebSocket Server] iPhone Hotspot detected - use bridge interface IP`)
+    // Show VPN interfaces separately with warning
+    if (vpnAddresses.length > 0) {
+      console.log(`\n🔒 [Network] VPN/Virtual interfaces detected (filtered out):`)
+      vpnAddresses.forEach(addr => {
+        console.log(`   🔒 ${addr.interface} (${addr.type}): ${addr.address} - Not used for device connections`)
+      })
+      console.log(`💡 [Network] Tip: Devices should connect via WiFi/physical network, not VPN`)
+    }
+
+    if (allAddresses.some(addr => addr.type === 'hotspot')) {
+      console.log(`\n📱 [WebSocket Server] iPhone Hotspot detected - devices can connect directly!`)
     }
 
     // Start/Restart Bonjour service (handles unpublish/republish internally)
@@ -731,23 +918,41 @@ export class SnapTestWebSocketServer {
     const udidMatch = deviceId.match(/(?:ios-usb-|android-)([A-F0-9-]+)/i)
     const extractedUdid = udidMatch ? udidMatch[1] : null
 
-    // Extract IP from ios-wifi-XXX format (e.g., ios-wifi-192-168-1-100 -> 192.168.1.100)
+    // Extract IP or hostname from ios-wifi-XXX format
+    // New format: ios-wifi-iphone (hostname-based)
+    // Old format: ios-wifi-192-168-1-100 (IP-based, for backward compatibility)
     const wifiMatch = deviceId.match(/^ios-wifi-(.+)$/)
-    const wifiIP = wifiMatch ? wifiMatch[1].replace(/-/g, '.') : null
+    const wifiIdentifier = wifiMatch ? wifiMatch[1] : null
 
-    // Find client with matching device ID, bundleId, deviceName, UDID, or IP address
+    // Try to parse as IP (backward compatibility with old format)
+    const isIPFormat = wifiIdentifier && /^\d+(-\d+){3}$/.test(wifiIdentifier)
+    const wifiIP = isIPFormat ? wifiIdentifier.replace(/-/g, '.') : null
+
+    // Extract hostname from new format (ios-wifi-iphone -> iphone)
+    const wifiHostname = wifiIdentifier && !isIPFormat ? wifiIdentifier : null
+
+    // Find client with matching device ID, bundleId, deviceName, UDID, hostname, or IP address
     for (const [ws, deviceInfo] of this.connectedClients.entries()) {
       const ipMatch = wifiIP && deviceInfo.ipAddress === wifiIP
+
+      // Hostname matching: flexible matching by normalizing both names
+      const normalizeHostname = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '')
+      const hostnameMatch = wifiHostname &&
+        (normalizeHostname(deviceInfo.deviceName).includes(wifiHostname) ||
+         wifiHostname.includes(normalizeHostname(deviceInfo.deviceName)))
 
       if (
         deviceInfo.bundleId === deviceId ||
         deviceInfo.deviceName === deviceId ||
         (extractedUdid && deviceInfo.bundleId.includes(extractedUdid)) ||
-        ipMatch // Match ios-wifi-XXX device IDs by IP address
+        ipMatch || // Match by IP address (backward compatibility)
+        hostnameMatch // Match by hostname (new format)
       ) {
         console.log(`✅ [WebSocket Server] Found matching device: ${deviceInfo.deviceName} (${deviceInfo.bundleId})`)
         if (ipMatch) {
           console.log(`✅ [WebSocket Server] Matched by IP address: ${deviceInfo.ipAddress}`)
+        } else if (hostnameMatch) {
+          console.log(`✅ [WebSocket Server] Matched by hostname: ${wifiHostname}`)
         }
         console.log(`📤 [WebSocket Server] Sending to SDK:`, JSON.stringify(message))
         this.sendJSON(ws, message)

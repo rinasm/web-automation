@@ -18,6 +18,7 @@ export const IPC_CHANNELS = {
   SCAN_DEVICES: 'mobile:scan-devices',
   DEVICE_DISCOVERED: 'mobile:device-discovered',
   SCAN_COMPLETE: 'mobile:scan-complete',
+  GET_CONNECTED_SDK_DEVICES: 'mobile:get-connected-sdk-devices',
 
   // ADB Operations (Android)
   ADB_CONNECT: 'mobile:adb-connect',
@@ -107,6 +108,23 @@ export function setupMobileDeviceIPC(ipcMain: any) {
     } catch (error: any) {
       console.error('📱 [IPC] Scan error:', error)
       return { success: false, error: error.message }
+    }
+  })
+
+  // Get connected SDK devices
+  ipcMain.handle(IPC_CHANNELS.GET_CONNECTED_SDK_DEVICES, async () => {
+    console.log('📱 [IPC] Getting connected SDK devices...')
+
+    try {
+      const { getWebSocketServer } = require('./websocketServer')
+      const wsServer = getWebSocketServer()
+      const connectedDevices = wsServer.getConnectedDevices()
+
+      console.log(`📱 [IPC] Found ${connectedDevices.length} connected SDK device(s)`)
+      return connectedDevices
+    } catch (error: any) {
+      console.error('📱 [IPC] Get connected SDK devices error:', error)
+      return []
     }
   })
 
@@ -385,123 +403,25 @@ export function setupMobileDeviceIPC(ipcMain: any) {
  * Scan for iOS devices connected via USB
  */
 async function scanForIOSDevices(): Promise<IOSDevice[]> {
-  const { exec } = require('child_process')
-  const util = require('util')
-  const execPromise = util.promisify(exec)
-
   try {
     console.log('📱 [IPC] Scanning for iOS devices (Network scan for WiFi automation)...')
 
     const devices: IOSDevice[] = []
 
-    // Method 1: Scan network for iOS devices using ARP
-    console.log('📱 [IPC] Scanning network for iOS devices...')
-    try {
-      const arpResult = await execPromise('arp -a')
-      const arpOutput = arpResult.stdout
+    // ARP network scanning disabled - unreliable and picks up wrong devices
+    // Note: ARP table hostnames can be missing ("?") or belong to other devices
+    // Real devices should connect via SDK WebSocket and will be added automatically
+    console.log('📱 [IPC] Network scanning disabled - devices will connect via SDK WebSocket')
+    console.log('📱 [IPC] To connect your iPhone:')
+    console.log('📱 [IPC]   1. Open your iOS app with SnapTest SDK integrated')
+    console.log('📱 [IPC]   2. Ensure iPhone and Mac are on the same WiFi network')
+    console.log('📱 [IPC]   3. SDK will auto-discover and connect via Bonjour')
+    console.log('📱 [IPC]   4. Device will appear automatically when SDK connects')
 
-      // Look for devices with "iphone" or "ipad" in their hostname
-      const arpLines = arpOutput.split('\n')
-      const iosDeviceLines = arpLines.filter((line: string) =>
-        line.toLowerCase().includes('iphone') || line.toLowerCase().includes('ipad')
-      )
-
-      console.log(`📱 [IPC] Found ${iosDeviceLines.length} potential iOS device(s) on network`)
-
-      for (const line of iosDeviceLines) {
-        // Extract hostname and IP address
-        // Format: "hostname (192.168.x.x) at xx:xx:xx:xx:xx:xx on en0 ifscope [ethernet]"
-        const match = line.match(/^([^\s]+)\s+\((\d+\.\d+\.\d+\.\d+)\)/)
-        if (match) {
-          const hostname = match[1]
-          const ipAddress = match[2]
-
-          console.log(`📱 [IPC] Found iOS device: ${hostname} at ${ipAddress}`)
-
-          const device: IOSDevice = {
-            id: `ios-wifi-${ipAddress.replace(/\./g, '-')}`,
-            name: `${hostname} (WiFi)`,
-            os: 'ios',
-            osVersion: 'Unknown',
-            ip: ipAddress,
-            port: 8100, // WDA default port
-            status: 'disconnected',
-            isEmulator: false,
-            capabilities: {
-              screenWidth: 1170,
-              screenHeight: 2532,
-              pixelRatio: 3,
-              userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15',
-              hasTouch: true,
-              supportsOrientation: true,
-              supportsGeolocation: true
-            },
-            udid: ipAddress // Use IP as UDID for network devices
-          }
-
-          devices.push(device)
-        }
-      }
-    } catch (error: any) {
-      console.error('📱 [IPC] Error scanning network:', error.message)
-    }
-
-    // Method 2: Try USB devices (backup method)
-    console.log('📱 [IPC] Checking USB connections...')
-    try {
-      const result = await execPromise('/opt/homebrew/bin/idevice_id -l')
-      const stdout = result.stdout
-      const udids = stdout.trim().split('\n').filter((line: string) => line.length > 0)
-
-      if (udids.length > 0) {
-        console.log(`📱 [IPC] Found ${udids.length} USB device(s):`, udids)
-
-        for (const udid of udids) {
-          try {
-            const nameResult = await execPromise(`/opt/homebrew/bin/ideviceinfo -u ${udid} -k DeviceName`)
-            const deviceName = nameResult.stdout.trim()
-
-            const versionResult = await execPromise(`/opt/homebrew/bin/ideviceinfo -u ${udid} -k ProductVersion`)
-            const iosVersion = versionResult.stdout.trim()
-
-            // Check if we already have this device via WiFi
-            const existingWiFiDevice = devices.find(d => d.name.includes(deviceName))
-            if (existingWiFiDevice) {
-              console.log(`📱 [IPC] Device ${deviceName} already found via WiFi, skipping USB entry`)
-              continue
-            }
-
-            const device: IOSDevice = {
-              id: `ios-usb-${udid}`,
-              name: `${deviceName} (USB)`,
-              os: 'ios',
-              osVersion: iosVersion || 'Unknown',
-              ip: 'localhost',
-              port: 8100,
-              status: 'disconnected',
-              isEmulator: false,
-              capabilities: {
-                screenWidth: 1170,
-                screenHeight: 2532,
-                pixelRatio: 3,
-                userAgent: `Mozilla/5.0 (iPhone; CPU iPhone OS ${iosVersion.replace(/\./g, '_')} like Mac OS X) AppleWebKit/605.1.15`,
-                hasTouch: true,
-                supportsOrientation: true,
-                supportsGeolocation: true
-              },
-              udid: udid
-            }
-
-            devices.push(device)
-            console.log(`📱 [IPC] Detected USB device: ${deviceName} (${iosVersion})`)
-          } catch (error: any) {
-            console.error(`📱 [IPC] Error getting info for USB device ${udid}:`, error.message)
-          }
-        }
-      }
-    } catch (error: any) {
-      console.log('📱 [IPC] No USB devices found')
-    }
+    // USB device detection disabled - SDK WebSocket is the primary connection method
+    // Note: USB devices are unreliable and cause phantom/stale entries
+    // Real devices should connect via SDK WebSocket and will be added automatically
+    console.log('📱 [IPC] USB scanning disabled - devices will connect via SDK WebSocket')
 
     if (devices.length === 0) {
       console.log('📱 [IPC] ❌ No iOS devices found')
